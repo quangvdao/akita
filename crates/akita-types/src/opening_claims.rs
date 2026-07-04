@@ -24,6 +24,7 @@ pub const GROUPED_ROOT_DENSE_UNSUPPORTED: &str =
     "dense polynomial multi-group root batching is not supported; see specs/multi-group-batching.md";
 
 /// Legacy grouped-root unsupported message kept for stale-proof diagnostics.
+#[deprecated(note = "multi-group root-direct opening is supported for one-hot Direct setup")]
 pub const GROUPED_ROOT_UNSUPPORTED: &str =
     "multi-group root batching is not supported yet; see specs/multi-group-batching.md";
 

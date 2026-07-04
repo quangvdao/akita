@@ -89,6 +89,7 @@ macro_rules! impl_multi_chunk_companion {
 }
 
 pub mod conservative_commitment;
+mod effective_schedule;
 pub mod generated_families;
 pub mod proof_optimized;
 pub mod tensor_verifier;
@@ -96,6 +97,7 @@ pub mod tensor_verifier;
 pub mod test_support;
 mod transcript_binding;
 pub use conservative_commitment::ConservativeCommitmentConfig;
+pub use effective_schedule::effective_batched_schedule;
 pub use proof_optimized::{
     matrix_envelope_for_schedule, setup_level_params_from_runtime_schedule,
     worst_case_grouped_opening_batch_for_shape,
@@ -303,6 +305,15 @@ pub trait CommitmentConfig: Clone + Send + Sync + 'static {
     /// `schedules-*` feature is enabled. The default is `None` (DP-only).
     fn schedule_catalog() -> Option<akita_planner::GeneratedScheduleTable> {
         None
+    }
+
+    /// Whether [`akita_prover::api::commitment::commit_final_group`] may run
+    /// under this config adapter.
+    ///
+    /// Conservative precommit adapters return `false`; grouped final commits
+    /// require the regular preset config.
+    fn supports_grouped_final_commit() -> bool {
+        true
     }
 
     /// Build the runtime [`Schedule`] for `key`.

@@ -353,15 +353,36 @@ where
 /// Propagates [`CommitmentConfig::get_params_for_prove`].
 fn should_transform_root_commitment<Cfg, const D: usize>(
     layout: &OpeningClaimsLayout,
+    schedule: &akita_types::Schedule,
 ) -> Result<bool, AkitaError>
 where
     Cfg: CommitmentConfig,
 {
+    if layout.num_groups() > 1 {
+        return Ok(false);
+    }
     if !root_tensor_projection_enabled::<Cfg::Field, Cfg::ExtField, D>(layout.max_num_vars()) {
         return Ok(false);
     }
-    let schedule = Cfg::get_params_for_prove(layout)?;
-    Ok(schedule_root_fold_step(&schedule).is_some())
+    Ok(schedule_root_fold_step(schedule).is_some())
+}
+
+fn validate_onehot_chunk_size_for_single_group<F, const D: usize, P>(
+    polys: &[P],
+    params: &LevelParams,
+    group_index: usize,
+    expected_count: usize,
+) -> Result<(), AkitaError>
+where
+    F: FieldCore,
+    P: RootPolyShape<F, D>,
+{
+    if polys.len() != expected_count {
+        return Err(AkitaError::InvalidInput(
+            "one-hot validation polynomial count mismatch with opening group".to_string(),
+        ));
+    }
+    validate_onehot_chunk_size_for_slice::<F, D, P>(polys, params.onehot_chunk_size, group_index)
 }
 
 /// Validate a batched commitment request and derive its `OpeningClaimsLayout`.
@@ -486,8 +507,9 @@ where
     B: RootCommitBackend<Cfg::Field, P, Cfg::ExtField, D>,
 {
     let layout = prepare_batched_commit_inputs::<Cfg::Field, D, P>(polys, expanded, &[])?;
-    let params = Cfg::get_params_for_batched_commitment(&layout)?;
-    let transform_root = should_transform_root_commitment::<Cfg, D>(&layout)?;
+    let schedule = Cfg::get_params_for_prove(&layout)?;
+    let params = Cfg::grouped_root_commit_params(&schedule)?;
+    let transform_root = should_transform_root_commitment::<Cfg, D>(&layout, &schedule)?;
     commit_with_selected_params::<Cfg, D, P, B>(
         polys,
         expanded,
@@ -528,19 +550,48 @@ where
         ));
     }
 
+    if !Cfg::supports_grouped_final_commit() {
+        return Err(AkitaError::InvalidInput(
+            "commit_final_group requires a non-conservative CommitmentConfig; use \
+             ConservativeCommitmentConfig only for precommits"
+                .to_string(),
+        ));
+    }
+
     let layout =
         prepare_batched_commit_inputs::<Cfg::Field, D, P>(polys, expanded, &precommitteds)?;
-    let params = Cfg::get_params_for_batched_commitment(&layout)?;
-    let transform_root = should_transform_root_commitment::<Cfg, D>(&layout)?;
-    let final_layout = OpeningClaimsLayout::from_groups(vec![layout.root_final_group_layout()?])?;
-    commit_with_selected_params::<Cfg, D, P, B>(
+    let schedule = Cfg::get_params_for_prove(&layout)?;
+    let params = Cfg::grouped_root_commit_params(&schedule)?;
+    let transform_root = should_transform_root_commitment::<Cfg, D>(&layout, &schedule)?;
+    let final_group = layout.root_final_group_layout()?;
+    validate_onehot_chunk_size_for_single_group::<Cfg::Field, D, P>(
         polys,
-        expanded,
-        stack,
-        &final_layout,
         &params,
-        transform_root,
-    )
+        layout.root_final_group_index()?,
+        final_group.num_polynomials(),
+    )?;
+    validate_commit_level_params::<Cfg::Field, D>(&params, expanded)?;
+    let commit_ctx = stack.commit();
+    if transform_root {
+        let tensor_ctx = stack.tensor();
+        let transformed = polys
+            .iter()
+            .map(|poly| {
+                tensor_root_projection::<Cfg::Field, P, Cfg::ExtField, B, D>(
+                    tensor_ctx.backend(),
+                    Some(tensor_ctx.prepared()),
+                    poly,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        commit_with_validated_params::<Cfg::Field, D, RootTensorProjectionPoly<Cfg::Field, D>, B>(
+            &transformed,
+            commit_ctx,
+            &params,
+        )
+    } else {
+        commit_with_validated_params::<Cfg::Field, D, P, B>(polys, commit_ctx, &params)
+    }
 }
 
 /// Commit one polynomial bundle using already-selected level parameters.

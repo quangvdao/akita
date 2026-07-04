@@ -360,10 +360,10 @@ impl LevelParams {
     }
 
     /// Reject grouped-root params at scalar-only call sites.
-    pub fn reject_grouped_root(&self, context: &str) -> Result<(), AkitaError> {
+    pub fn require_scalar_level(&self, context: &str) -> Result<(), AkitaError> {
         if self.has_precommitted_groups() {
             return Err(AkitaError::InvalidSetup(format!(
-                "{context} does not support grouped root params yet"
+                "{context} requires scalar root level params"
             )));
         }
         Ok(())
@@ -780,7 +780,7 @@ impl LevelParams {
         self.precommitted_groups.len() + 1
     }
 
-    fn validate_root_opening_batch(
+    pub fn validate_root_opening_batch(
         &self,
         opening_batch: &OpeningClaimsLayout,
     ) -> Result<usize, AkitaError> {
@@ -1055,7 +1055,7 @@ impl LevelParams {
         if self.has_precommitted_groups() {
             return self.grouped_m_row_count_for(num_commitments, layout);
         }
-        self.reject_grouped_root("m_row_count_for")?;
+        self.require_scalar_level("m_row_count_for")?;
         self.d_start(num_commitments)?
             .checked_add(self.n_d_active_for(layout))
             .ok_or_else(Self::m_row_overflow)

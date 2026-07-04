@@ -5,7 +5,9 @@ use super::*;
 use crate::proof::direct::verify_zero_fold_openings_with_opening_batch;
 use crate::protocol::{validate_level_dispatch, validate_log_basis};
 use akita_algebra::CyclotomicRing;
-use akita_config::{bind_transcript_instance_descriptor, CommitmentConfig};
+use akita_config::{
+    bind_transcript_instance_descriptor, effective_batched_schedule, CommitmentConfig,
+};
 use akita_field::{
     AkitaError, CanonicalField, FieldCore, FrobeniusExtField, FromPrimitiveInt, HalvingField,
     PseudoMersenneField, RandomSampling,
@@ -13,12 +15,10 @@ use akita_field::{
 use akita_serialization::AkitaSerialize;
 use akita_transcript::Transcript;
 use akita_types::{
-    folded_root_supports_opening_shape, root_direct_schedule, root_tensor_projection_enabled,
-    schedule_root_fold_step, should_reject_grouped_root, AkitaBatchedProof, AkitaBatchedRootProof,
-    AkitaLevelProof, AkitaSetupSeed, AkitaVerifierSetup, BasisMode, CleartextWitnessProof,
-    FpExtEncoding, LevelParams, LevelParamsLike, OpeningClaims, OpeningClaimsLayout,
-    RingCommitment, Schedule, SetupContributionMode, Step,
-    GROUPED_ROOT_RECURSIVE_SETUP_UNSUPPORTED,
+    should_reject_grouped_root, AkitaBatchedProof, AkitaBatchedRootProof, AkitaLevelProof,
+    AkitaSetupSeed, AkitaVerifierSetup, BasisMode, CleartextWitnessProof, FpExtEncoding,
+    LevelParams, LevelParamsLike, OpeningClaims, OpeningClaimsLayout, RingCommitment, Schedule,
+    SetupContributionMode, Step, GROUPED_ROOT_RECURSIVE_SETUP_UNSUPPORTED,
 };
 use std::array::from_fn;
 
@@ -73,41 +73,10 @@ where
     Ok(())
 }
 
-fn effective_batched_schedule<Cfg, const D: usize>(
-    opening_batch: &OpeningClaimsLayout,
-    opening_point: &[Cfg::ExtField],
-) -> Result<Schedule, AkitaError>
-where
-    Cfg: CommitmentConfig,
-    Cfg::Field: FieldCore,
-    Cfg::ExtField: FpExtEncoding<Cfg::Field>,
-{
-    let num_vars = opening_batch.max_num_vars();
-    let root_direct_witness_len = opening_batch.root_direct_witness_len()?;
-    let mut schedule = Cfg::get_params_for_prove(opening_batch)?;
-    if opening_batch.num_groups() > 1 {
-        let commit_params = Cfg::grouped_root_commit_params(&schedule)?;
-        schedule = root_direct_schedule(root_direct_witness_len, commit_params)?;
-    }
-    if let Some(root_step) = schedule_root_fold_step(&schedule) {
-        let alpha_bits = root_step.params.ring_dimension.trailing_zeros() as usize;
-        if !folded_root_supports_opening_shape::<Cfg::Field, Cfg::ExtField, D>(
-            std::slice::from_ref(&opening_point),
-            &root_step.params,
-            alpha_bits,
-        ) && !root_tensor_projection_enabled::<Cfg::Field, Cfg::ExtField, D>(num_vars)
-        {
-            let commit_params = Cfg::grouped_root_commit_params(&schedule)?;
-            schedule = root_direct_schedule(root_direct_witness_len, commit_params)?;
-        }
-    }
-
-    Ok(schedule)
-}
-
 fn reject_unsupported_grouped_root(
     opening_batch: &OpeningClaimsLayout,
     setup_contribution_mode: SetupContributionMode,
+    dense_commitment_config: bool,
 ) -> Result<(), AkitaError> {
     if let Some(message) = should_reject_grouped_root(opening_batch, setup_contribution_mode, None)
     {
@@ -116,6 +85,9 @@ fn reject_unsupported_grouped_root(
         } else {
             AkitaError::InvalidProof
         });
+    }
+    if opening_batch.num_groups() > 1 && dense_commitment_config {
+        return Err(AkitaError::InvalidProof);
     }
     Ok(())
 }
@@ -144,6 +116,7 @@ where
     if opening_batch.num_total_polynomials() != witnesses.len() {
         return Err(AkitaError::InvalidProof);
     }
+    let _final_group_index = params.validate_root_opening_batch(opening_batch)?;
 
     for group_index in 0..opening_batch.num_groups() {
         let group_layout = opening_batch.group_layout(group_index)?;
@@ -383,7 +356,12 @@ where
         if range.end > witnesses.len() {
             return Err(AkitaError::InvalidProof);
         }
-        let expected = claims.group_commitment(group_index).copied()?;
+        let expected_rows = params.root_group_commitment_rows(&opening_batch, group_index)?;
+        let commitment = claims.group_commitment(group_index).copied()?;
+        if commitment.u.len() != expected_rows {
+            return Err(AkitaError::InvalidProof);
+        }
+        let expected = commitment;
         let recomputed = if group_index == final_group {
             recommit_direct_witness_group::<F, D>(&witnesses[range], setup, params)?
         } else {
@@ -463,7 +441,11 @@ where
         .validate(setup.expanded.seed())
         .map_err(|_| AkitaError::InvalidProof)?;
     let opening_batch = claims.layout().map_err(|_| AkitaError::InvalidProof)?;
-    reject_unsupported_grouped_root(&opening_batch, setup_contribution_mode)?;
+    reject_unsupported_grouped_root(
+        &opening_batch,
+        setup_contribution_mode,
+        Cfg::decomposition().log_commit_bound != 1,
+    )?;
     let schedule = effective_batched_schedule::<Cfg, D>(&opening_batch, claims.point())
         .map_err(|_| AkitaError::InvalidProof)?;
     validate_schedule_onehot_chunk_size::<Cfg>(&schedule)?;
@@ -776,7 +758,7 @@ mod tests {
     #[test]
     fn reject_unsupported_grouped_root_allows_direct_multi_group() {
         let batch = OpeningClaimsLayout::from_group_sizes(4, &[1, 2]).expect("grouped batch");
-        reject_unsupported_grouped_root(&batch, SetupContributionMode::Direct)
+        reject_unsupported_grouped_root(&batch, SetupContributionMode::Direct, false)
             .expect("direct multi-group verification is schedule-validated");
     }
 }

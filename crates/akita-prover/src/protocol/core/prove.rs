@@ -6,6 +6,7 @@ use crate::compute::{
     RingSwitchProveBackend, RootPolyShape, RootProvePoly, SuffixDispatchOpeningProveBackendFor,
     SuffixDispatchTensorProveBackendFor, SuffixRingSwitchProveBackend, TensorBackendFor,
 };
+use akita_config::effective_batched_schedule;
 use akita_field::unreduced::ReduceTo;
 use akita_field::AdditiveGroup;
 use akita_types::{
@@ -135,25 +136,7 @@ where
     ) {
         return Err(grouped_root_prover_error(message));
     }
-    let num_vars = opening_batch.max_num_vars();
-    let root_direct_witness_len = opening_batch.root_direct_witness_len()?;
-    let mut schedule = Cfg::get_params_for_prove(&opening_batch)?;
-    if opening_batch.num_groups() > 1 {
-        let commit_params = Cfg::grouped_root_commit_params(&schedule)?;
-        schedule = root_direct_schedule(root_direct_witness_len, commit_params)?;
-    }
-    if let Some(root_step) = schedule_root_fold_step(&schedule) {
-        let alpha_bits = root_step.params.ring_dimension.trailing_zeros() as usize;
-        if !folded_root_supports_opening_shape::<Cfg::Field, Cfg::ExtField, D>(
-            std::slice::from_ref(&opening_claims.point()),
-            &root_step.params,
-            alpha_bits,
-        ) && !root_tensor_projection_enabled::<Cfg::Field, Cfg::ExtField, D>(num_vars)
-        {
-            let commit_params = Cfg::grouped_root_commit_params(&schedule)?;
-            schedule = root_direct_schedule(root_direct_witness_len, commit_params)?;
-        }
-    }
+    let schedule = effective_batched_schedule::<Cfg, D>(&opening_batch, opening_claims.point())?;
     let root_commit_params = match schedule.steps.first() {
         Some(Step::Fold(root)) => Some(&root.params),
         Some(Step::Direct(root)) => root.params.as_ref(),

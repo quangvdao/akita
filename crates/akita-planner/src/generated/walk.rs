@@ -20,9 +20,7 @@ use akita_types::{
 use crate::generated::{
     validate_entry_key, GeneratedFoldStep, GeneratedScheduleTableEntry, GeneratedStep,
 };
-use crate::group_batch::{
-    grouped_root_direct_witness_len, grouped_root_next_w_len, grouped_root_precommitted_groups,
-};
+use crate::group_batch::{grouped_root_next_w_len, grouped_root_precommitted_groups};
 use crate::PlannerPolicy;
 
 pub(crate) struct GeneratedEntryWalkOutput {
@@ -452,7 +450,7 @@ fn walk_grouped_generated_schedule_entry(
             }
             GeneratedStep::Direct(direct) => {
                 let (witness_shape, direct_current_w_len, params) = if fold_level == 0 {
-                    let direct_current_w_len = grouped_root_direct_witness_len(key)?;
+                    let direct_current_w_len = key.opening_layout()?.root_direct_witness_len()?;
                     let fold_shape = fold_challenge_shape_at_level(AkitaScheduleInputs {
                         num_vars: key.final_group.num_vars(),
                         level: 0,

@@ -147,9 +147,9 @@ parallel singleton proof path.
 
 ## Current State
 
-The codebase has implemented the grouped scheduler and the commitment-side
-final-group path. It still does not implement end-to-end multi-group opening
-proofs.
+The codebase has implemented the grouped scheduler, conservative precommit,
+`commit_final_group`, and **root-direct multi-group opening proofs** for
+one-hot polynomials under `SetupContributionMode::Direct`.
 
 Implemented now:
 
@@ -180,20 +180,17 @@ Implemented now:
   reconstructs precommitted `PrecommittedGroupParams` values from
   `PolynomialGroupLayout`s under `ConservativeCommitmentConfig<Cfg>`,
   resolves grouped params through `Cfg::get_params_for_grouped_batched_commitment`,
-  applies the same tensor root-projection decision as the grouped final schedule,
-  and emits the final commitment plus hint.
+  and emits the final commitment plus hint. Grouped final commits disable tensor
+  root projection (`G > 1` always root-directs from raw polynomials).
+- `batched_prove` / `batched_verify` support `G > 1` root-direct (`ZeroFold`)
+  one-hot openings when `SetupContributionMode::Direct`. Schedule resolution
+  goes through `akita_config::effective_batched_schedule`.
 - Setup-envelope sizing includes conservative commitments for eligible
   proof-optimized one-hot configs.
 
 Still future / guarded:
 
-- Grouped opening proofs are not implemented.
-- `batched_prove` rejects `G > 1` before schedule lookup. Tiered,
-  recursive-setup-contribution, and dense grouped roots return specific errors;
-  otherwise the prover returns the generic grouped-root unsupported error.
-- `batched_verify` rejects `G > 1` before schedule lookup, with tiered and
-  recursive setup-contribution returning specific setup errors and generic
-  grouped claims returning `AkitaError::InvalidProof`.
+- Folded grouped root openings (relation quotient with per-group `z_hat` blocks).
 - Grouped root relation quotient, verifier ring-switch replay, and setup
   contribution remain future work. Folded grouped roots are planned only when the
   root can hand off to a singleton recursive suffix; immediately terminal
@@ -1143,30 +1140,16 @@ At current `commit_final_group` time:
 At current prove time:
 
 - `ProverOpeningData` / `OpeningClaimsLayout` must be internally consistent.
-- `G > 1` must reject before schedule lookup.
-- Tiered multi-group proofs must reject with `AkitaError::InvalidSetup`.
-- Recursive setup contribution must reject with `AkitaError::InvalidSetup`.
-- Dense multi-group proofs must reject with `AkitaError::InvalidInput`.
-- Generic one-hot multi-group proofs must reject with
-  `AkitaError::InvalidInput(GROUPED_ROOT_UNSUPPORTED)`.
-
-At Phase 2 prove time:
-
-- `OpeningClaimsLayout` must be internally consistent.
-- `commitments.len() == G`.
-- `hints.len() == G`.
-- `sum_g K_g == num_claims`.
-- Each commitment row count must match its group params.
+- `G > 1` with `SetupContributionMode::Recursive` rejects with `InvalidSetup`.
+- Dense commitment configs (`log_commit_bound != 1`) reject multi-group roots.
+- Tiered multi-group proofs reject with `AkitaError::InvalidSetup`.
+- Dense polynomials in a multi-group batch reject with `InvalidInput` on prove.
 
 At current verify time:
 
 - `OpeningClaims` must be internally consistent.
-- `G > 1` must reject before schedule lookup.
-- Tiered multi-group proofs must reject with `AkitaError::InvalidSetup`.
-- Recursive setup contribution must reject with `AkitaError::InvalidSetup`.
-- Generic multi-group proofs must reject with `AkitaError::InvalidProof`.
-
-At Phase 2 verify time:
+- `G > 1` with recursive setup contribution rejects with `InvalidSetup`.
+- Dense commitment configs reject multi-group roots with `InvalidProof`.
 
 - The verifier must reconstruct the `AkitaScheduleLookupKey` from the public
   opening batch, setup, and config policy.

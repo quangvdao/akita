@@ -201,6 +201,17 @@ impl AkitaScheduleLookupKey {
         Ok(Self::single(layout.root_final_group_layout()?))
     }
 
+    /// Build a grouped opening layout from this schedule lookup key.
+    pub fn opening_layout(&self) -> Result<OpeningClaimsLayout, AkitaError> {
+        let mut groups: Vec<PolynomialGroupLayout> = self
+            .precommitteds
+            .iter()
+            .map(|layout| layout.group)
+            .collect();
+        groups.push(self.final_group);
+        OpeningClaimsLayout::from_groups(groups)
+    }
+
     /// Number of commitment groups in this schedule key.
     pub fn num_commitment_groups(&self) -> usize {
         self.precommitteds.len() + 1
@@ -285,7 +296,7 @@ pub fn w_ring_element_count_with_counts_for_layout_bits(
     num_z_segments: usize,
     layout: crate::layout::MRowLayout,
 ) -> Result<usize, AkitaError> {
-    lp.reject_grouped_root("w_ring_element_count_with_counts_for_layout_bits")?;
+    lp.require_scalar_level("w_ring_element_count_with_counts_for_layout_bits")?;
     let e_hat_count = num_polynomials
         .checked_mul(lp.num_blocks)
         .and_then(|n| n.checked_mul(lp.num_digits_open))

@@ -68,6 +68,10 @@ impl<Cfg: CommitmentConfig> CommitmentConfig for ConservativeCommitmentConfig<Cf
         Cfg::schedule_catalog()
     }
 
+    fn supports_grouped_final_commit() -> bool {
+        false
+    }
+
     fn get_params_for_prove(opening_batch: &OpeningClaimsLayout) -> Result<Schedule, AkitaError> {
         let key = AkitaScheduleLookupKey::from_layout(opening_batch)?.final_group;
         conservative_commit_schedule::<Cfg>(&key)
