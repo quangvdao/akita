@@ -607,19 +607,24 @@ pub fn root_current_w_len(lp: &LevelParams) -> usize {
 
 /// Build the root-direct schedule for roots that do not admit a fold step.
 ///
-/// `commit_params` carries the root commit layout that
-/// `Cfg::get_params_for_batched_commitment` returns for this schedule shape.
+/// `current_w_len` is the flattened witness length in field elements (for a
+/// singleton group, `2^num_vars`; for grouped batches, the per-group hypercube
+/// sizes summed over polynomials). `commit_params` carries the root commit
+/// layout that `Cfg::get_params_for_batched_commitment` returns for this
+/// schedule shape.
 ///
 /// # Errors
 ///
-/// Returns an error if `num_vars` cannot be represented as a witness length.
+/// Returns an error if `current_w_len` is zero.
 pub fn root_direct_schedule(
-    num_vars: usize,
+    current_w_len: usize,
     commit_params: LevelParams,
 ) -> Result<Schedule, AkitaError> {
-    let current_w_len = 1usize.checked_shl(num_vars as u32).ok_or_else(|| {
-        AkitaError::InvalidSetup("root-direct witness length overflow".to_string())
-    })?;
+    if current_w_len == 0 {
+        return Err(AkitaError::InvalidSetup(
+            "root-direct witness length is zero".to_string(),
+        ));
+    }
     Ok(Schedule {
         steps: vec![Step::Direct(DirectStep {
             current_w_len,
@@ -855,7 +860,7 @@ mod tests {
             },
         );
         let schedule =
-            root_direct_schedule(3, dummy_commit_params.clone()).expect("root-direct schedule");
+            root_direct_schedule(8, dummy_commit_params.clone()).expect("root-direct schedule");
         assert_eq!(schedule.total_bytes, 0);
 
         let [Step::Direct(step)] = schedule.steps.as_slice() else {
@@ -865,6 +870,41 @@ mod tests {
         assert_eq!(step.witness_shape, CleartextWitnessShape::FieldElements(8));
         assert_eq!(step.direct_bytes, 0);
         assert_eq!(step.params.as_ref(), Some(&dummy_commit_params));
+    }
+
+    #[test]
+    fn root_direct_schedule_uses_grouped_witness_len() {
+        let layout = OpeningClaimsLayout::from_groups(vec![
+            PolynomialGroupLayout::new(2, 1),
+            PolynomialGroupLayout::new(3, 2),
+            PolynomialGroupLayout::new(4, 1),
+        ])
+        .expect("grouped layout");
+        let witness_len = layout.root_direct_witness_len().expect("witness len");
+        assert_eq!(witness_len, 4 + 16 + 16);
+
+        let dummy_commit_params = LevelParams::params_only(
+            crate::SisModulusFamily::Q128,
+            64,
+            3,
+            1,
+            1,
+            1,
+            akita_challenges::SparseChallengeConfig::Uniform {
+                weight: 1,
+                nonzero_coeffs: vec![-1, 1],
+            },
+        );
+        let schedule =
+            root_direct_schedule(witness_len, dummy_commit_params).expect("root-direct schedule");
+        let [Step::Direct(step)] = schedule.steps.as_slice() else {
+            panic!("root-direct schedule should contain one direct step");
+        };
+        assert_eq!(step.current_w_len, witness_len);
+        assert_eq!(
+            step.witness_shape,
+            CleartextWitnessShape::FieldElements(witness_len)
+        );
     }
 
     fn dummy_sumcheck<F: FieldCore>(rounds: usize, degree: usize) -> SumcheckProof<F> {

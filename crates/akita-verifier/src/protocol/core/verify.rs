@@ -83,10 +83,11 @@ where
     Cfg::ExtField: FpExtEncoding<Cfg::Field>,
 {
     let num_vars = opening_batch.max_num_vars();
+    let root_direct_witness_len = opening_batch.root_direct_witness_len()?;
     let mut schedule = Cfg::get_params_for_prove(opening_batch)?;
     if opening_batch.num_groups() > 1 {
         let commit_params = Cfg::grouped_root_commit_params(&schedule)?;
-        schedule = root_direct_schedule(num_vars, commit_params)?;
+        schedule = root_direct_schedule(root_direct_witness_len, commit_params)?;
     }
     if let Some(root_step) = schedule_root_fold_step(&schedule) {
         let alpha_bits = root_step.params.ring_dimension.trailing_zeros() as usize;
@@ -97,7 +98,7 @@ where
         ) && !root_tensor_projection_enabled::<Cfg::Field, Cfg::ExtField, D>(num_vars)
         {
             let commit_params = Cfg::grouped_root_commit_params(&schedule)?;
-            schedule = root_direct_schedule(num_vars, commit_params)?;
+            schedule = root_direct_schedule(root_direct_witness_len, commit_params)?;
         }
     }
 

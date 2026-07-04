@@ -250,9 +250,13 @@ fn fallback_root_direct_schedule_binds_real_opening_batch_commit_params() {
         "test fixture: pick an opening batch where batched and singleton params differ"
     );
 
-    let real_schedule =
-        root_direct_schedule(real_opening_batch.max_num_vars(), real_params.clone())
-            .expect("fallback root-direct schedule");
+    let real_schedule = root_direct_schedule(
+        real_opening_batch
+            .root_direct_witness_len()
+            .expect("witness len"),
+        real_params.clone(),
+    )
+    .expect("fallback root-direct schedule");
     let bound_levels = setup_level_params_from_runtime_schedule(&real_schedule.steps);
     assert_eq!(
         bound_levels,
@@ -263,9 +267,13 @@ fn fallback_root_direct_schedule_binds_real_opening_batch_commit_params() {
     // The descriptor binds those params through the schedule digest: a
     // singleton-params fallback at the same `num_vars` must produce a
     // different preamble than the real batched-params fallback.
-    let singleton_schedule =
-        root_direct_schedule(real_opening_batch.max_num_vars(), singleton_params)
-            .expect("singleton fallback root-direct schedule");
+    let singleton_schedule = root_direct_schedule(
+        real_opening_batch
+            .root_direct_witness_len()
+            .expect("witness len"),
+        singleton_params,
+    )
+    .expect("singleton fallback root-direct schedule");
     assert_ne!(
         digest_effective_schedule(&real_schedule),
         digest_effective_schedule(&singleton_schedule),
@@ -319,8 +327,13 @@ fn setup_matrix_envelope_covers_single_point_batch_root_widths() {
     let opening_batch = OpeningClaimsLayout::new(30, 4).expect("supported batched opening_batch");
     let root_params = Cfg::get_params_for_batched_commitment(&opening_batch)
         .expect("supported batched commit params");
-    let schedule = root_direct_schedule(opening_batch.max_num_vars(), root_params.clone())
-        .expect("synthetic direct schedule");
+    let schedule = root_direct_schedule(
+        opening_batch
+            .root_direct_witness_len()
+            .expect("witness len"),
+        root_params.clone(),
+    )
+    .expect("synthetic direct schedule");
     let required = expected_runtime_root_setup_len(&root_params, &opening_batch);
 
     let runtime_envelope = matrix_envelope_for_schedule::<Cfg>(&schedule, &opening_batch).unwrap();
