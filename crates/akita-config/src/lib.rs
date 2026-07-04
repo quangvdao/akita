@@ -307,8 +307,7 @@ pub trait CommitmentConfig: Clone + Send + Sync + 'static {
         None
     }
 
-    /// Whether [`akita_prover::api::commitment::commit_final_group`] may run
-    /// under this config adapter.
+    /// Whether grouped `commit_final_group` may run under this config adapter.
     ///
     /// Conservative precommit adapters return `false`; grouped final commits
     /// require the regular preset config.

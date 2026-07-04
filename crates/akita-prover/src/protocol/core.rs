@@ -37,7 +37,7 @@ use akita_types::{
     append_claim_values_to_transcript, basis_weights, build_trace_table_scaled,
     check_extension_opening_reduction_output, derive_tensor_extension_opening_claim_from_partials,
     embed_ring_subfield_scalar, embed_ring_subfield_vector, ensure_trace_stage2_supported,
-    folded_root_supports_opening_shape, prepare_opening_point, recover_ring_subfield_inner_product,
+    prepare_opening_point, recover_ring_subfield_inner_product,
     relation_claim_from_rows_extension, reorder_stage1_coords,
     ring_subfield_packed_extension_opening_point, root_current_w_len,
     root_tensor_projection_enabled, sample_public_row_coefficients, schedule_is_root_direct,
