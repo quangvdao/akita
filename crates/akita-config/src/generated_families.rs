@@ -30,10 +30,11 @@ pub const DEFAULT_NUM_POLYS: &[usize] = &[1, 4];
 
 /// Batched widths reachable by Jolt's K=16 Wjolt commitment. The 49 fixed
 /// members are 32 address chunks, 16 fused-increment chunks, and the increment
-/// MSB; bytecode contributes at most 6 chunks for `log_T < 25`, and RAM at
-/// most 16 chunks for a 64-bit address space.
+/// MSB; bytecode and RAM each contribute at most 16 chunks for their 64-bit
+/// address spaces.
 pub const JOLT_K16_NUM_POLYS: &[usize] = &[
     1, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
+    72, 73, 74, 75, 76, 77, 78, 79, 80, 81,
 ];
 
 /// Maximum number of precommitted groups emitted for multi-group-root generated tables.
