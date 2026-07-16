@@ -108,7 +108,12 @@ impl_proof_optimized_preset!(
     64,
     128,
     1,
-    16
+    16,
+    schedules = (
+        "schedules-fp128-d64-onehot-k16",
+        "fp128_d64_onehot_k16",
+        fp128_d64_onehot_k16_table
+    )
 );
 impl_multi_chunk_companion!(
     D64OneHotMultiChunk,

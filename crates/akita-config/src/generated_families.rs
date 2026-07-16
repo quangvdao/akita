@@ -28,6 +28,14 @@ use crate::{policy_of, tensor_verifier, CommitmentConfig};
 /// Default batched opening sizes emitted for every Akita shipped family.
 pub const DEFAULT_NUM_POLYS: &[usize] = &[1, 4];
 
+/// Batched widths reachable by Jolt's K=16 Wjolt commitment. The 49 fixed
+/// members are 32 address chunks, 16 fused-increment chunks, and the increment
+/// MSB; bytecode contributes at most 6 chunks for `log_T < 25`, and RAM at
+/// most 16 chunks for a 64-bit address space.
+pub const JOLT_K16_NUM_POLYS: &[usize] = &[
+    1, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
+];
+
 /// Maximum number of precommitted groups emitted for multi-group-root generated tables.
 pub const DEFAULT_GROUP_BATCH_MAX_PRECOMMITTED_GROUPS: usize = 2;
 
@@ -189,6 +197,25 @@ fn precommitted_group_patterns(main_num_polynomials: usize) -> Vec<Vec<usize>> {
 }
 
 macro_rules! family_row {
+    (num_polys = $num_polys:expr, $module:literal, $const:literal, $feat:literal, $min:expr, $max:expr, $cfg:ty) => {
+        GeneratedFamily {
+            module_name: $module,
+            const_name: $const,
+            schedule_feature: $feat,
+            min_num_vars: $min,
+            max_num_vars: $max,
+            num_polys: $num_polys,
+            regen: regen::<$cfg>,
+            regen_group_batch: regen_group_batch::<$cfg>,
+            emit_group_batch: false,
+            group_batch_keys: group_batch_keys::<$cfg>,
+            table_backed: table_backed::<$cfg>,
+            policy: family_policy::<$cfg>,
+            ring_challenge_config: <$cfg as CommitmentConfig>::ring_challenge_config,
+            fold_challenge_shape_at_level:
+                <$cfg as CommitmentConfig>::fold_challenge_shape_at_level,
+        }
+    };
     (group_batch, $module:literal, $const:literal, $feat:literal, $min:expr, $max:expr, $cfg:ty) => {
         GeneratedFamily {
             module_name: $module,
@@ -304,6 +331,15 @@ pub const ALL_GENERATED_FAMILIES: &[GeneratedFamily] = &[
         1,
         50,
         fp128::D64OneHot
+    ),
+    family_row!(
+        num_polys = JOLT_K16_NUM_POLYS,
+        "fp128_d64_onehot_k16",
+        "FP128_D64_ONEHOT_K16_SCHEDULES",
+        "fp128-d64-onehot-k16",
+        1,
+        28,
+        fp128::D64OneHotK16
     ),
     family_row!(
         "fp128_d64_full",

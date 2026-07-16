@@ -27,6 +27,7 @@ all-schedules = [
 ]
 schedules-default = [
   "fp128-d64-onehot",
+  "fp128-d64-onehot-k16",
   "fp128-d64-full",
   "fp128-d128-onehot",
   "fp128-d128-full",
@@ -37,6 +38,7 @@ schedules-default = [
   "fp64-d256-onehot",
 ]
 fp128-d64-onehot = []
+fp128-d64-onehot-k16 = []
 fp128-d64-full = []
 fp128-d128-onehot = []
 fp128-d128-full = []

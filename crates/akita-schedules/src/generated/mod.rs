@@ -18,6 +18,8 @@ pub mod fp128_d64_full;
 pub mod fp128_d64_full_multi_chunk;
 #[cfg(feature = "fp128-d64-onehot")]
 pub mod fp128_d64_onehot;
+#[cfg(feature = "fp128-d64-onehot-k16")]
+pub mod fp128_d64_onehot_k16;
 #[cfg(feature = "fp128-d64-onehot-multi-chunk")]
 pub mod fp128_d64_onehot_multi_chunk;
 #[cfg(feature = "fp128-d64-onehot-multi-chunk-w2r2")]
@@ -74,6 +76,14 @@ pub fn fp128_d64_onehot_table() -> GeneratedScheduleTable {
     GeneratedScheduleTable {
         entries: fp128_d64_onehot::FP128_D64_ONEHOT_SCHEDULES,
         identity: fp128_d64_onehot::CATALOG_IDENTITY,
+    }
+}
+
+#[cfg(feature = "fp128-d64-onehot-k16")]
+pub fn fp128_d64_onehot_k16_table() -> GeneratedScheduleTable {
+    GeneratedScheduleTable {
+        entries: fp128_d64_onehot_k16::FP128_D64_ONEHOT_K16_SCHEDULES,
+        identity: fp128_d64_onehot_k16::CATALOG_IDENTITY,
     }
 }
 

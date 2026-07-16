@@ -968,9 +968,28 @@ fn all_proof_optimized_presets_use_shared_ring_challenge() {
 }
 
 #[test]
-fn d64_onehot_k16_uses_the_canonical_chunk_policy_without_a_catalog() {
+fn d64_onehot_k16_uses_the_canonical_chunk_policy_with_a_catalog() {
     assert_eq!(fp128::D64OneHotK16::onehot_chunk_size(), 16);
-    assert!(fp128::D64OneHotK16::schedule_catalog().is_none());
+    assert!(fp128::D64OneHotK16::schedule_catalog().is_some());
+}
+
+#[cfg(feature = "schedules-default")]
+#[test]
+fn d64_onehot_k16_catalog_covers_jolt_shapes() {
+    use akita_planner::generated::table_entry;
+    use akita_types::{AkitaScheduleLookupKey, PolynomialGroupLayout};
+
+    let catalog = fp128::D64OneHotK16::schedule_catalog().unwrap();
+    for num_vars in 1..=28 {
+        for &num_polys in crate::generated_families::JOLT_K16_NUM_POLYS {
+            let key =
+                AkitaScheduleLookupKey::single(PolynomialGroupLayout::new(num_vars, num_polys));
+            assert!(
+                table_entry(catalog, &key).is_some(),
+                "missing Jolt K=16 schedule for ({num_vars}, {num_polys})"
+            );
+        }
+    }
 }
 
 #[test]

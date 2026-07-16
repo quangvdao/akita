@@ -68,6 +68,7 @@ fn family_catalog_is_linked(family: &GeneratedFamily) -> bool {
         "fp128_d128_full" => fp128::D128Full::schedule_catalog().is_some(),
         "fp128_d128_onehot" => fp128::D128OneHot::schedule_catalog().is_some(),
         "fp128_d64_onehot" => fp128::D64OneHot::schedule_catalog().is_some(),
+        "fp128_d64_onehot_k16" => fp128::D64OneHotK16::schedule_catalog().is_some(),
         "fp128_d64_full" => fp128::D64Full::schedule_catalog().is_some(),
         "fp128_d64_onehot_tensor" => {
             tensor_verifier::fp128::D64OneHotTensor::schedule_catalog().is_some()
@@ -138,6 +139,9 @@ fn family_catalog(
             prepare_family_catalog::<fp128::D128OneHot>(family.module_name, keys)
         }
         "fp128_d64_onehot" => prepare_family_catalog::<fp128::D64OneHot>(family.module_name, keys),
+        "fp128_d64_onehot_k16" => {
+            prepare_family_catalog::<fp128::D64OneHotK16>(family.module_name, keys)
+        }
         "fp128_d64_full" => prepare_family_catalog::<fp128::D64Full>(family.module_name, keys),
         "fp128_d64_onehot_tensor" => prepare_family_catalog::<
             tensor_verifier::fp128::D64OneHotTensor,
