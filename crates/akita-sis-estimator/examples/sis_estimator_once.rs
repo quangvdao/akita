@@ -1,6 +1,6 @@
 use akita_sis_estimator::{
-    cost_infinity, cost_zeta, estimate, scalar_sis_from_ring, AkitaModulusProfileId, Bound,
-    CostValue, EstimateConfig, OptimizerConfig, SearchMode, SisNorm, SisParameters,
+    cost_infinity, cost_zeta, estimate, Adps16Mode, AkitaModulusProfileId, Bound, CostValue,
+    EstimateConfig, OptimizerConfig, ReductionCostModel, SearchMode, SisNorm, SisParameters,
 };
 use std::{
     env,
@@ -17,6 +17,12 @@ enum Mode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Norm {
+    Infinity,
+    Euclidean,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Profile {
     LocalMinimum,
     ExhaustiveSerial,
@@ -26,6 +32,7 @@ enum Profile {
 #[derive(Debug)]
 struct Args {
     mode: Mode,
+    norm: Norm,
     profile: Profile,
     family: AkitaModulusProfileId,
     raw_n: Option<u32>,
@@ -37,6 +44,7 @@ struct Args {
     beta: Option<u32>,
     zeta: Option<u64>,
     iterations: u32,
+    cost_model: Option<ReductionCostModel>,
 }
 
 fn main() {
@@ -47,10 +55,11 @@ fn main() {
 
     let mut total = Duration::ZERO;
     let mut last = None;
+    let config = args.config();
     for _ in 0..args.iterations {
         let start = Instant::now();
         let cost = match args.mode {
-            Mode::Estimate => estimate(black_box(&params), black_box(&args.profile.config())),
+            Mode::Estimate => estimate(black_box(&params), black_box(&config)),
             Mode::Fixed => {
                 let beta = args
                     .beta
@@ -60,7 +69,7 @@ fn main() {
                     .unwrap_or_else(|| fatal("--zeta is required for --mode fixed"));
                 let config = EstimateConfig {
                     optimizer: OptimizerConfig::Fixed { beta, zeta },
-                    ..args.profile.config()
+                    ..config
                 };
                 cost_infinity(
                     black_box(beta),
@@ -78,7 +87,7 @@ fn main() {
                         zeta,
                         beta: args.profile.beta_search_mode(),
                     },
-                    ..args.profile.config()
+                    ..config
                 };
                 cost_zeta(black_box(zeta), black_box(&params), black_box(&config))
             }
@@ -92,11 +101,13 @@ fn main() {
     let seconds = total.as_secs_f64();
     let seconds_per_iter = seconds / f64::from(args.iterations);
     println!(
-        "mode,family,n,m,d,rank,width,coeff_linf_bound,iterations,total_seconds,seconds_per_iter,rop_log2,beta,zeta,lattice_dimension"
+        "mode,norm,cost_model,family,n,m,d,rank,width,length_bound,iterations,total_seconds,seconds_per_iter,rop_log2,beta,zeta,lattice_dimension"
     );
     println!(
-        "{},{},{},{},{},{},{},{},{},{:.9},{:.9},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},{},{:.9},{:.9},{},{},{},{}",
         args.mode.label(),
+        args.norm.label(),
+        cost_model_label(config.red_cost_model),
         args.family.label(),
         params.n,
         params.m.unwrap_or(0),
@@ -119,6 +130,7 @@ impl Args {
         let mut args = env::args().skip(1);
         let mut parsed = Self {
             mode: Mode::Estimate,
+            norm: Norm::Infinity,
             profile: Profile::LocalMinimum,
             family: AkitaModulusProfileId::Q32Offset99,
             raw_n: None,
@@ -130,6 +142,7 @@ impl Args {
             beta: None,
             zeta: None,
             iterations: 1,
+            cost_model: None,
         };
 
         while let Some(arg) = args.next() {
@@ -141,6 +154,8 @@ impl Args {
                         .unwrap_or_else(|| fatal(&format!("missing value for {arg}")));
                     match arg.as_str() {
                         "--mode" => parsed.mode = parse_mode(&value),
+                        "--norm" => parsed.norm = parse_norm(&value),
+                        "--cost-model" => parsed.cost_model = Some(parse_cost_model(&value)),
                         "--profile" => parsed.profile = parse_profile(&value),
                         "--family" => {
                             parsed.family = AkitaModulusProfileId::parse(&value)
@@ -151,7 +166,7 @@ impl Args {
                         "--d" => parsed.d = parse(&value, "--d"),
                         "--rank" => parsed.rank = parse(&value, "--rank"),
                         "--width" => parsed.width = parse(&value, "--width"),
-                        "--coeff-linf-bound" => {
+                        "--coeff-linf-bound" | "--length-bound" => {
                             parsed.coeff_linf_bound = parse(&value, "--coeff-linf-bound");
                         }
                         "--beta" => parsed.beta = Some(parse(&value, "--beta")),
@@ -171,29 +186,61 @@ impl Args {
         {
             usage(2);
         }
+        if parsed.norm == Norm::Euclidean && parsed.mode != Mode::Estimate {
+            fatal("Euclidean norm currently supports --mode estimate only");
+        }
         parsed
     }
 
     fn params(&self) -> akita_sis_estimator::Result<SisParameters> {
-        match (self.raw_n, self.raw_m) {
-            (Some(n), Some(m)) => SisParameters::try_new(
-                n,
-                self.family.modulus(),
-                Some(m),
-                Bound::from_u64(self.coeff_linf_bound),
-                SisNorm::Infinity,
-            ),
-            (None, None) => scalar_sis_from_ring(
-                self.family,
-                self.d,
-                self.rank,
-                self.width,
-                self.coeff_linf_bound,
+        let (n, m) = match (self.raw_n, self.raw_m) {
+            (Some(n), Some(m)) => (n, m),
+            (None, None) => (
+                self.rank
+                    .checked_mul(self.d)
+                    .unwrap_or_else(|| fatal("rank * d overflowed u32")),
+                u64::from(self.width)
+                    .checked_mul(u64::from(self.d))
+                    .unwrap_or_else(|| fatal("width * d overflowed u64")),
             ),
             _ => {
                 eprintln!("error: --n and --m must be provided together");
                 process::exit(2);
             }
+        };
+        SisParameters::try_new(
+            n,
+            self.family.modulus(),
+            Some(m),
+            Bound::from_u64(self.coeff_linf_bound),
+            self.norm.sis_norm(),
+        )
+    }
+
+    fn config(&self) -> EstimateConfig {
+        let mut config = match self.norm {
+            Norm::Infinity => self.profile.config(),
+            Norm::Euclidean => EstimateConfig::akita_euclidean_table(),
+        };
+        if let Some(cost_model) = self.cost_model {
+            config.red_cost_model = cost_model;
+        }
+        config
+    }
+}
+
+impl Norm {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Infinity => "infinity",
+            Self::Euclidean => "euclidean",
+        }
+    }
+
+    const fn sis_norm(self) -> SisNorm {
+        match self {
+            Self::Infinity => SisNorm::Infinity,
+            Self::Euclidean => SisNorm::Euclidean,
         }
     }
 }
@@ -241,6 +288,50 @@ fn parse_mode(value: &str) -> Mode {
     }
 }
 
+fn parse_norm(value: &str) -> Norm {
+    match value {
+        "infinity" | "linf" => Norm::Infinity,
+        "euclidean" | "l2" => Norm::Euclidean,
+        _ => fatal("norm must be one of: infinity, euclidean"),
+    }
+}
+
+fn parse_cost_model(value: &str) -> ReductionCostModel {
+    match value {
+        "bdgl16" => ReductionCostModel::Bdgl16,
+        "adps16-classical" => ReductionCostModel::Adps16 {
+            mode: Adps16Mode::Classical,
+        },
+        "adps16-quantum" => ReductionCostModel::Adps16 {
+            mode: Adps16Mode::Quantum,
+        },
+        "adps16-paranoid" => ReductionCostModel::Adps16 {
+            mode: Adps16Mode::Paranoid,
+        },
+        _ => fatal(
+            "cost model must be one of: bdgl16, adps16-classical, adps16-quantum, adps16-paranoid",
+        ),
+    }
+}
+
+fn cost_model_label(model: ReductionCostModel) -> &'static str {
+    match model {
+        ReductionCostModel::Bdgl16 => "bdgl16",
+        ReductionCostModel::Adps16 {
+            mode: Adps16Mode::Classical,
+        } => "adps16-classical",
+        ReductionCostModel::Adps16 {
+            mode: Adps16Mode::Quantum,
+        } => "adps16-quantum",
+        ReductionCostModel::Adps16 {
+            mode: Adps16Mode::Paranoid,
+        } => "adps16-paranoid",
+        ReductionCostModel::Matzov { .. } => "matzov",
+        ReductionCostModel::Gj21 { .. } => "gj21",
+        ReductionCostModel::Kyber { .. } => "kyber",
+    }
+}
+
 fn parse_profile(value: &str) -> Profile {
     match value {
         "local-minimum" | "local_minimum" => Profile::LocalMinimum,
@@ -282,7 +373,7 @@ fn optional_u64_text(value: Option<u64>) -> String {
 
 fn usage(code: i32) -> ! {
     eprintln!(
-        "usage: sis_estimator_once --family q32|q64|q128 (--n N --m N | --d N --rank N --width N) --coeff-linf-bound N [--mode estimate|fixed|zeta] [--profile local-minimum|exhaustive-serial|exhaustive-parallel] [--beta N] [--zeta N] [--iterations N]"
+        "usage: sis_estimator_once --family q32|q64|q128 (--n N --m N | --d N --rank N --width N) --length-bound N [--norm infinity|euclidean] [--cost-model bdgl16|adps16-classical|adps16-quantum|adps16-paranoid] [--mode estimate|fixed|zeta] [--profile local-minimum|exhaustive-serial|exhaustive-parallel] [--beta N] [--zeta N] [--iterations N]"
     );
     process::exit(code);
 }

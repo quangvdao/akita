@@ -35,10 +35,7 @@ pub fn validate_infinity_reduction(model: ReductionCostModel) -> Result<()> {
 /// Euclidean SIS path.
 pub fn validate_euclidean_reduction(model: ReductionCostModel) -> Result<()> {
     match model {
-        ReductionCostModel::Bdgl16 => Ok(()),
-        ReductionCostModel::Adps16 { .. } => Err(EstimatorError::Unsupported {
-            feature: "euclidean red_cost_model::ADPS16",
-        }),
+        ReductionCostModel::Adps16 { .. } | ReductionCostModel::Bdgl16 => Ok(()),
         ReductionCostModel::Matzov { .. } => Err(EstimatorError::Unsupported {
             feature: "euclidean red_cost_model::Matzov",
         }),

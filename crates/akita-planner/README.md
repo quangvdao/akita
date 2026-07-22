@@ -226,3 +226,13 @@ This boundary avoids a circular dependency while keeping a single source of trut
 - `crates/akita-config/src/bin/gen_schedule_tables.rs`: offline table emitter adapter for concrete presets.
 - `crates/akita-config/src/generated_families.rs`: preset family list and regeneration hooks.
 - `crates/akita-schedules/src/generated/`: feature-gated shipped schedule table data.
+
+## Ideal Setup-Offload Explorer
+
+The runtime planner above intentionally reflects the protocol Akita can replay
+today. The unconstrained target-state search lives in
+`crates/akita-sis-estimator/examples/ideal_setup_offload_planner.rs` and is
+specified in `specs/ideal-setup-offload-pareto-planner.md`. It independently
+searches source and checked decompositions, role-specific ring dimensions, all
+block splits, direct Rust SIS ranks, and a multi-objective setup-offload
+frontier. Its rows are design candidates, not runtime-valid schedules.
