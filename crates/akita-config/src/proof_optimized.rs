@@ -3,22 +3,27 @@
 //! Presets are unit structs that bind [`CommitmentConfig`] hooks to
 //! [`akita_types`] SIS primitives and generated schedule tables.
 
-use super::CommitmentConfig;
-use crate::matrix_envelope::{
-    accumulate_matrix_envelope_for_level, accumulate_terminal_matrix_envelope,
-};
+use super::{CommitmentConfig, PrecommittedCommitmentConfig};
 use akita_field::AkitaError;
 use akita_field::{Ext2, FpExt4, Prime128OffsetA7F7, Prime32Offset99, Prime64Offset59};
 use akita_types::{
-    AkitaExpandedSetup, AkitaScheduleLookupKey, CommittedGroupParams, FoldSchedule,
-    OpeningClaimsLayout, PolynomialGroupLayout, SetupMatrixEnvelope,
+    accumulate_matrix_envelope_for_level, accumulate_terminal_matrix_envelope,
+    setup_matrix_envelope_for_schedule, AkitaExpandedSetup, AkitaScheduleLookupKey,
+    CommittedGroupParams, FoldSchedule, OpeningClaimsLayout, PolynomialGroupLayout,
+    PrecommittedGroupDescriptor, SetupMatrixEnvelope,
 };
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 /// Minimum proof-optimized log-basis.
-pub(crate) const PROOF_OPTIMIZED_LOG_BASIS_MIN: u32 = 2;
+///
+/// This is also the fixed **root-fold** basis: `log_basis_search_range_at_level(0)`
+/// collapses the root to `basis_range.0`. Pinning the root to `3` (rather than the
+/// smallest reachable `2`) keeps the shrink strong enough that every preset — dense
+/// and small-field included — supports the full `nv` range, and matches the value
+/// the unpinned planner already favored at the root.
+pub(crate) const PROOF_OPTIMIZED_LOG_BASIS_MIN: u32 = 3;
 /// Maximum proof-optimized log-basis.
 pub(crate) const PROOF_OPTIMIZED_LOG_BASIS_MAX: u32 = 6;
 
@@ -28,6 +33,8 @@ pub(crate) const PROOF_OPTIMIZED_LOG_BASIS_MAX: u32 = 6;
 /// setup capacity metadata. Production families currently scan at most a few
 /// hundred scalar shapes.
 const MAX_VERIFIER_SETUP_SCHEDULE_SCANS: usize = 1 << 14;
+
+const DEFAULT_GROUP_BATCH_MAX_PRECOMMITTED_GROUPS: usize = 2;
 
 /// Shared short ring-challenge policy for every proof-optimized preset.
 ///
@@ -59,7 +66,15 @@ pub(crate) fn proof_optimized_schedule_key<Cfg: CommitmentConfig>(
         .root_precommitted_group_layouts()?
         .iter()
         .copied()
-        .map(crate::conservative_commitment::conservative_precommitted_group_params::<Cfg>)
+        .map(|group| {
+            group.validate()?;
+            let singleton =
+                OpeningClaimsLayout::new(group.num_vars(), group.num_polynomials())?;
+            let params = <PrecommittedCommitmentConfig<Cfg> as CommitmentConfig>::get_params_for_batched_commitment(
+                &singleton,
+            )?;
+            Ok(PrecommittedGroupDescriptor::from_params(group, &params))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let key = AkitaScheduleLookupKey {
         final_group,
@@ -119,7 +134,7 @@ fn proof_optimized_max_setup_matrix_size_uncached<Cfg: CommitmentConfig>(
 ) -> Result<SetupMatrixEnvelope, AkitaError> {
     let layouts = setup_envelope_scan_layouts::<Cfg>(max_num_vars, max_num_batched_polys)?;
     let mut saw_supported_shape = false;
-    let mut envelope = SetupMatrixEnvelope { max_setup_len: 1 };
+    let mut envelope = SetupMatrixEnvelope::minimum();
     for layout in &layouts {
         let Ok(schedule) = Cfg::get_params_for_prove(layout) else {
             continue;
@@ -133,7 +148,7 @@ fn proof_optimized_max_setup_matrix_size_uncached<Cfg: CommitmentConfig>(
     // keys. Size their shared matrices from the same keys directly: converting
     // through `OpeningClaimsLayout` would discard frozen precommitted params
     // and could resolve a different schedule.
-    for key in crate::generated_families::recursive_group_batch_candidates_for_capacity::<Cfg>(
+    for key in crate::setup_prefix_slots::recursive_group_batch_candidates_for_capacity::<Cfg>(
         max_num_vars,
         max_num_batched_polys,
     )? {
@@ -177,8 +192,7 @@ fn setup_envelope_scan_layouts<Cfg: CommitmentConfig>(
     let mut layouts = Vec::new();
     let supports_multi_group_root = Cfg::decomposition().log_commit_bound == 1;
     let precommitted_group = PolynomialGroupLayout::new(max_num_vars, 1);
-    let precommitted_groups = [precommitted_group;
-        crate::generated_families::DEFAULT_GROUP_BATCH_MAX_PRECOMMITTED_GROUPS];
+    let precommitted_groups = [precommitted_group; DEFAULT_GROUP_BATCH_MAX_PRECOMMITTED_GROUPS];
 
     let mut push_layout = |layout| {
         if layouts.len() >= MAX_VERIFIER_SETUP_SCHEDULE_SCANS {
@@ -196,8 +210,7 @@ fn setup_envelope_scan_layouts<Cfg: CommitmentConfig>(
             let main_group = PolynomialGroupLayout::new(main_num_vars, main_num_polys);
             push_layout(OpeningClaimsLayout::from_root_groups(&[], main_group)?)?;
             if supports_multi_group_root {
-                let num_precommitted =
-                    crate::generated_families::DEFAULT_GROUP_BATCH_MAX_PRECOMMITTED_GROUPS;
+                let num_precommitted = DEFAULT_GROUP_BATCH_MAX_PRECOMMITTED_GROUPS;
                 let Some(total_polynomials) = main_num_polys.checked_add(num_precommitted) else {
                     continue;
                 };
@@ -213,20 +226,6 @@ fn setup_envelope_scan_layouts<Cfg: CommitmentConfig>(
     }
 
     Ok(layouts)
-}
-
-fn setup_matrix_envelope_for_schedule(
-    schedule: &FoldSchedule,
-) -> Result<SetupMatrixEnvelope, AkitaError> {
-    let mut envelope = SetupMatrixEnvelope { max_setup_len: 1 };
-    for params in setup_level_params_from_schedule(schedule) {
-        accumulate_matrix_envelope_for_level(&params, &mut envelope.max_setup_len)?;
-    }
-    accumulate_terminal_matrix_envelope(
-        &schedule.terminal.params.witness,
-        &mut envelope.max_setup_len,
-    )?;
-    Ok(envelope)
 }
 
 /// Extract setup-level params from a `FoldSchedule`.
@@ -425,7 +424,7 @@ macro_rules! impl_proof_optimized_preset {
     };
     (@schedule_catalog none) => {};
     (@schedule_catalog ($feat:literal, $family:literal, $table:ident)) => {
-        fn schedule_catalog() -> Option<akita_planner::GeneratedScheduleTable> {
+        fn schedule_catalog() -> Option<akita_schedules::GeneratedScheduleTable> {
             #[cfg(feature = $feat)]
             {
                 Some(akita_schedules::$table())

@@ -3,13 +3,12 @@
 use std::collections::BTreeSet;
 
 use akita_field::AkitaError;
-use akita_planner::suffix_opening_layout;
+use akita_schedules::suffix_opening_layout;
 use akita_types::{
-    active_setup_field_len, padded_setup_prefix_len, FoldSchedule, SetupPrefixSlotId,
-    SETUP_OFFLOAD_D_SETUP,
+    active_setup_field_len, padded_setup_prefix_len, AkitaScheduleLookupKey, FoldSchedule,
+    SetupPrefixSlotId, SETUP_OFFLOAD_D_SETUP,
 };
 
-use crate::generated_families::recursive_group_batch_candidates_for_capacity;
 use crate::CommitmentConfig;
 
 fn setup_prefix_slot_matches(
@@ -83,7 +82,7 @@ pub(crate) fn extract_setup_prefix_slot_ids_from_schedule(
 /// Enumerate every exact setup-prefix slot required by selected recursive schedules.
 ///
 /// Selected keys are the bounded catalog/profile set from
-/// [`crate::generated_families::recursive_group_batch_candidates_for_capacity`],
+/// `recursive_group_batch_candidates_for_capacity`,
 /// not a dense capacity grid.
 pub fn setup_prefix_slot_ids_for_capacity<Cfg: CommitmentConfig>(
     max_num_vars: usize,
@@ -110,21 +109,83 @@ pub fn setup_prefix_slot_ids_for_capacity<Cfg: CommitmentConfig>(
     Ok(ids.into_iter().collect())
 }
 
-#[cfg(test)]
+fn key_within_setup_capacity(
+    key: &AkitaScheduleLookupKey,
+    max_num_vars: usize,
+    max_num_batched_polys: usize,
+) -> bool {
+    !key.precommitteds.is_empty()
+        && key.final_group.num_vars() <= max_num_vars
+        && key.final_group.num_polynomials() <= max_num_batched_polys
+}
+
+fn push_unique_schedule_key(
+    keys: &mut Vec<AkitaScheduleLookupKey>,
+    candidate: AkitaScheduleLookupKey,
+) {
+    if !keys.contains(&candidate) {
+        keys.push(candidate);
+    }
+}
+
+pub(crate) fn recursive_group_batch_candidates_for_capacity<Cfg: CommitmentConfig>(
+    max_num_vars: usize,
+    max_num_batched_polys: usize,
+) -> Result<Vec<AkitaScheduleLookupKey>, AkitaError> {
+    if !Cfg::recursive_setup_planning()
+        || Cfg::decomposition().log_commit_bound != 1
+        || Cfg::D != SETUP_OFFLOAD_D_SETUP
+        || max_num_batched_polys == 0
+    {
+        return Ok(Vec::new());
+    }
+
+    let mut keys = Vec::new();
+    if let Some(catalog) = Cfg::schedule_catalog() {
+        for entry in catalog.entries {
+            if entry.root.precommitted_groups.is_empty() {
+                continue;
+            }
+            let candidate = AkitaScheduleLookupKey {
+                final_group: entry.root.final_group.layout,
+                precommitteds: entry
+                    .root
+                    .precommitted_groups
+                    .iter()
+                    .map(|group| group.descriptor)
+                    .collect(),
+            };
+            if key_within_setup_capacity(&candidate, max_num_vars, max_num_batched_polys) {
+                push_unique_schedule_key(&mut keys, candidate);
+            }
+        }
+    }
+
+    keys.sort_by(akita_schedules::runtime_schedule_key_cmp);
+    Ok(keys)
+}
+
+#[cfg(all(test, feature = "schedules-fp128-d64-onehot-recursive"))]
 mod tests {
     use super::*;
-    use crate::generated_families::recursive_group_batch_candidates_for_capacity;
     use crate::proof_optimized::fp128;
-    use crate::RecursiveCommitmentConfig;
-    use akita_types::{AkitaScheduleLookupKey, PolynomialGroupLayout, PrecommittedGroupDescriptor};
+    use crate::{CommitmentConfig, PrecommittedCommitmentConfig, RecursiveCommitmentConfig};
+    use akita_types::{
+        AkitaScheduleLookupKey, OpeningClaimsLayout, PolynomialGroupLayout,
+        PrecommittedGroupDescriptor,
+    };
 
     type SetupCfg = RecursiveCommitmentConfig<fp128::D64OneHot>;
 
     fn profiling_recursive_key() -> AkitaScheduleLookupKey {
         let pre = PolynomialGroupLayout::new(16, 1);
+        let singleton =
+            OpeningClaimsLayout::new(pre.num_vars(), pre.num_polynomials()).expect("singleton");
         let pre_params =
-            crate::conservative_commitment::conservative_commit_params::<SetupCfg>(&pre)
-                .expect("precommit params");
+            <PrecommittedCommitmentConfig<SetupCfg> as CommitmentConfig>::get_params_for_batched_commitment(
+                &singleton,
+            )
+            .expect("precommit params");
         let precommitted = PrecommittedGroupDescriptor::from_params(pre, &pre_params);
         AkitaScheduleLookupKey {
             final_group: PolynomialGroupLayout::new(32, 2),
@@ -159,7 +220,7 @@ mod tests {
 
     #[test]
     fn selected_recursive_keys_yield_exact_prefix_slots() {
-        use crate::matrix_envelope::inflate_envelope_for_setup_prefix_slot;
+        use akita_types::inflate_envelope_for_setup_prefix_slot;
         use akita_types::SetupMatrixEnvelope;
 
         let slots = setup_prefix_slot_ids_for_capacity::<SetupCfg>(32, 4).expect("slots");
@@ -173,11 +234,11 @@ mod tests {
             slots.len()
         );
 
-        let mut slot_envelope = SetupMatrixEnvelope { max_setup_len: 1 };
+        let mut slot_envelope = SetupMatrixEnvelope::minimum();
         for slot in &slots {
             let n_prefix = slot.n_prefix().expect("n_prefix");
             assert!(n_prefix >= slot.natural_len);
-            let mut one_slot_envelope = SetupMatrixEnvelope { max_setup_len: 1 };
+            let mut one_slot_envelope = SetupMatrixEnvelope::minimum();
             inflate_envelope_for_setup_prefix_slot(&mut one_slot_envelope, slot, slot.d_setup)
                 .expect("inflate one slot");
             assert!(
@@ -203,6 +264,16 @@ mod tests {
     fn recursive_requirements_match_successor_slot_identity() {
         let key = profiling_recursive_key();
         let schedule = SetupCfg::runtime_schedule(key.clone()).expect("recursive schedule");
+        let envelope =
+            akita_types::setup_matrix_envelope_for_schedule(&schedule).expect("setup envelope");
+        let envelope_field_elements = envelope
+            .max_setup_len
+            .checked_mul(schedule.root.params.final_group.commitment.d_a())
+            .expect("setup envelope field length");
+        assert!(
+            envelope_field_elements <= akita_types::MAX_SETUP_MATRIX_FIELD_ELEMENTS,
+            "selected recursive schedule exceeds the supported setup envelope"
+        );
         let ids = extract_setup_prefix_slot_ids_from_schedule(
             &schedule,
             &key.opening_layout().expect("layout"),

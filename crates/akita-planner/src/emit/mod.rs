@@ -17,8 +17,9 @@ use akita_types::{
     RootSource, SetupPrefixSlotId, WitnessPartition,
 };
 
-use crate::catalog_identity::expected_catalog_identity;
-use crate::generated::{
+use crate::PlannerPolicy;
+use akita_schedules::expected_catalog_identity;
+use akita_schedules::generated::{
     GeneratedBlockGeometry, GeneratedCommittedGroup, GeneratedFoldScheduleEntry,
     GeneratedInnerCommitMatrix, GeneratedOpenCommitMatrix, GeneratedOuterCommitMatrix,
     GeneratedRecursiveFold, GeneratedRootFinalChallenge, GeneratedRootFinalGroup,
@@ -26,7 +27,6 @@ use crate::generated::{
     GeneratedScheduleCatalogIdentity, GeneratedSetupPrefixInput, GeneratedTerminalFold,
     GeneratedWitnessPartition,
 };
-use crate::PlannerPolicy;
 
 /// One family the emitter writes to `akita-schedules/src/generated/`.
 #[derive(Clone)]
@@ -440,6 +440,10 @@ fn emit_identity_const(identity: &GeneratedScheduleCatalogIdentity) -> String {
             "GeneratedScheduleCatalogIdentity {{\n",
             "    family_name: \"{family_name}\",\n",
             "    protocol_epoch: {protocol_epoch},\n",
+            "    cost_model: PlannerCostModelId::{cost_model},\n",
+            "    selection_policy: SelectionPolicyId::{selection_policy},\n",
+            "    max_setup_envelope_field_elements: {max_setup_envelope_field_elements},\n",
+            "    min_offloaded_witness_contraction: {min_offloaded_witness_contraction},\n",
             "    sis_modulus_profile: {sis_modulus_profile},\n",
             "    sis_security_policy: SisSecurityPolicyId::{sis_security_policy},\n",
             "    sis_table_digest: SisTableDigest({sis_table_digest}),\n",
@@ -462,6 +466,10 @@ fn emit_identity_const(identity: &GeneratedScheduleCatalogIdentity) -> String {
         ring_dims = ring_dims,
         family_name = identity.family_name,
         protocol_epoch = identity.protocol_epoch,
+        cost_model = identity.cost_model.name(),
+        selection_policy = identity.selection_policy.name(),
+        max_setup_envelope_field_elements = identity.max_setup_envelope_field_elements,
+        min_offloaded_witness_contraction = identity.min_offloaded_witness_contraction,
         sis_modulus_profile = emit_sis_modulus_profile(identity.sis_modulus_profile),
         sis_security_policy = identity.sis_security_policy.name(),
         sis_table_digest = format_bytes(identity.sis_table_digest.0),
@@ -515,8 +523,7 @@ fn materialized_entries(
             }
         }
     }
-    entries
-        .sort_by(|(left, _), (right, _)| crate::generated::runtime_schedule_key_cmp(left, right));
+    entries.sort_by(|(left, _), (right, _)| akita_schedules::runtime_schedule_key_cmp(left, right));
     Ok(entries)
 }
 
@@ -536,8 +543,9 @@ pub fn emit_family_module(spec: &EmitSpec) -> Result<String, String> {
          GeneratedRootFinalChallenge, GeneratedRootFinalGroup, GeneratedRootFold, \
          GeneratedRootPrecommittedGroup, GeneratedRootSource, GeneratedScheduleCatalogIdentity, \
          GeneratedSetupPrefixInput, GeneratedTerminalFold, GeneratedWitnessPartition, \
-         PolynomialGroupLayout, PrecommittedGroupDescriptor, SisModulusProfileId, \
-         SisSecurityPolicyId, SisTableDigest, TensorChallengeShape,\n}};"
+         PlannerCostModelId, PolynomialGroupLayout, PrecommittedGroupDescriptor, \
+         SelectionPolicyId, SisModulusProfileId, SisSecurityPolicyId, SisTableDigest, \
+         TensorChallengeShape,\n}};"
     )
     .map_err(|e| e.to_string())?;
     writeln!(out).map_err(|e| e.to_string())?;
@@ -555,7 +563,7 @@ pub fn emit_family_module(spec: &EmitSpec) -> Result<String, String> {
         emit_schedule_entry(&mut out, &key, &schedule)?;
         memory_entries.push(generated_entry(&key, &schedule));
     }
-    debug_assert!(crate::generated::catalog_entries_sorted_for_lookup(
+    debug_assert!(akita_schedules::catalog_entries_sorted_for_lookup(
         &memory_entries
     ));
 
