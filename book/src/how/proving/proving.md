@@ -114,8 +114,11 @@ and claim value. A fold's job is exactly to trade that triple for the next one
 at smaller witness size; the sections below spell out how.
 
 ## Proving one fold
-Before each fold, here we implicitley reduce the claim over the field-based to the ring-based (refer to the previous section) so the claim for each fold reduces $\widetilde{w}^{(j)}(r^{(j)}) = v^{(j)}$ to a claim on a newly
-committed $w^{(j+1)}$. It returns one level proof for the verifier plus
+
+Before each fold, the field-based evaluation claim is implicitly reduced to
+the ring-based form described in the previous section. The fold then reduces
+$\widetilde{w}^{(j)}(r^{(j)}) = v^{(j)}$ to a claim on a newly committed
+$w^{(j+1)}$. It returns one level proof for the verifier plus
 prover-side state threaded to the next fold — including the new commitment's
 hints, which become $\hat{t}$ there. Concretely, one fold does three things:
 
