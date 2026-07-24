@@ -1,4 +1,4 @@
-# Multilinear evaluation reduction
+# Field-to-ring evaluation reduction
 
 This page considers one base-field evaluation claim:
 
@@ -83,9 +83,9 @@ $$
 \text{position}\longrightarrow\text{block}\longrightarrow\text{inner}.
 $$
 
-## From multilinear evaluation to two rings
+## Reduce to a ring-valued evaluation
 
-### Pack the inner axis
+### Pack the inner axis into ring coefficients
 
 For each position $p$ and block $b$, pack the inner slice into a ring:
 
@@ -100,7 +100,25 @@ $$
 This is only a change of representation. The table entry
 $f[\ell,p,b]$ becomes the coefficient of $X^\ell$.
 
-### Fold the position and block axes
+Equivalently, the values $F_{p,b}$ form a ring-valued multilinear table
+
+$$
+f_R:\{0,1\}^{n-d}\rightarrow R,
+\qquad
+f_R[p,b]:=F_{p,b}.
+$$
+
+This is the same underlying table under a lossless coefficient packing, not a
+new witness. The ring polynomial has $d=\log_2D$ fewer variables and is opened
+at
+
+$$
+r_R=(r_{\mathrm{pos}},r_{\mathrm{blk}}),
+$$
+
+whose base-field coordinates act as constant elements of $R$.
+
+### Evaluate the ring polynomial
 
 First evaluate the position coordinate independently inside every block:
 
@@ -126,6 +144,14 @@ Y(X)
 =
 \sum_bB_bE_b(X).
 \tag{4}
+$$
+
+Thus Equation (4) is the ring-based evaluation claim
+
+$$
+\boxed{
+\widetilde f_R(r_R)=Y.
+}
 $$
 
 Now
@@ -167,7 +193,7 @@ $$
 \tag{7}
 $$
 
-## Base-field trace opening
+## Recover the evaluation with `TraceOpen`
 
 Let $\sigma_{-1}$ be the ring automorphism
 
@@ -237,9 +263,10 @@ $$
 `TraceOpen` is a coefficient pairing. It is not the univariate evaluation
 $Y(\alpha)$ used to reduce ring-valued relations to the field.
 
-## Eliminate the virtual ring $Y$
+## Eliminate the intermediate ring evaluation $Y$
 
-A direct protocol could expose $Y$ and check two statements:
+### Hachi: expose $Y$
+The baseline Hachi protocol exposes $Y$ and checks two statements:
 
 $$
 Y=\sum_bB_bE_b,
@@ -253,12 +280,9 @@ $$
 \tag{13}
 $$
 
-But Equation (12) already determines $Y$ from the folded rings $E_b$.
-Sending $Y$ would introduce a redundant ring element and an extra interface
-between the two checks.
-
-Akita instead composes the two linear maps. The witness committed for this fold
-contains digit decompositions of the position-folded rings:
+The first statement proves that $Y$ is the correct evaluation of the
+ring-valued polynomial. In this fold, each $E_b(X)$ is digit-decomposed into
+the committed partial-evaluation witness:
 
 $$
 E_b(X)
@@ -267,19 +291,33 @@ E_b(X)
 \tag{14}
 $$
 
-where $G_h$ are public gadget weights. Consequently,
+where $\hat e_{b,h}$ are the digit rings and $G_h$ are public gadget weights.
+Substituting this decomposition into Equation (12) gives
 
 $$
+\boxed{
 Y(X)
 =
 \sum_{b,h}B_bG_h\hat e_{b,h}(X).
+}
 \tag{15}
 $$
 
-The ring $Y$ is now only a convenient name for this public linear
-combination. It does not need to appear in the proof.
+Equation (15) is a relation over the ring that enforces consistency between
+the ring element $Y$ and the witness polynomials $\hat e_{b,h}(X)$. Hachi
+sends $Y$ to the verifier, which checks Equation (13) directly. The prover
+then proves Equation (15) using the same ring-relation machinery as the other
+constraints that bind the previous witness to the next witness, as described
+in Section 2.5.2.
 
-Apply `TraceOpen` directly to Equation (15):
+### Akita: compose the two checks
+
+Akita's crucial observation is that $Y$ is already determined linearly by the
+committed partial-evaluation witness and that
+$\operatorname{TraceOpen}_P$ is itself a linear map. Sending $Y$ would
+therefore introduce a redundant ring element, an extra interface between the
+two checks, and additional verifier work. Akita instead composes the two
+linear maps and applies `TraceOpen` directly to Equation (15):
 
 $$
 \begin{aligned}
@@ -347,6 +385,9 @@ Thus every factor in Equation (18) has a simple role:
 - $B_b$ evaluates across blocks; and
 - $J_\ell=I_\ell$ evaluates inside the packed ring.
 
+This row acts on the committed partial-evaluation digits $\hat e$. The other
+fold relations bind those digits back to the original committed polynomial.
+
 The two possible protocol views are:
 
 ```text
@@ -363,7 +404,7 @@ Eliminate Y:
 committed ê  ───────composed public linear map──────>  v
 ```
 
-## Write the relation as a sumcheck claim
+## Express the direct relation as a sumcheck claim
 
 The committed fold witness is stored as one flat table $w$. Flatten the
 indices $(b,h,\ell)$ into a Boolean address $x$, and define the public
@@ -396,6 +437,7 @@ This is the evaluation-correctness relation consumed by the later sumcheck
 protocol. It is already a field-valued linear relation on the committed
 witness. It therefore needs neither evaluation at $\alpha$ nor a ring-switch
 quotient.
+
 
 [Sumcheck stages](./sumcheck-stages.md#add-the-opening-claim-consistency)
 explains how this claim is row-batched and fused with the other Stage-2 terms.

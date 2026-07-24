@@ -21,7 +21,7 @@
   - [Setup and commitment](./how/commitment.md)
   - [Transcript and instance binding](./how/transcript.md)
   - [The proving protocol](./how/proving/proving.md)
-    - [Multilinear evaluation reduction](./how/proving/trace-open-reduction.md)
+    - [Field-to-ring evaluation reduction](./how/proving/field-ring-reduction.md)
     - [Ring relation in Akita fold](./how/proving/akita-fold.md)
     - [Sumcheck stages](./how/proving/sumcheck-stages.md)
     - [Opening points and digit-innermost layout](./how/proving/opening-points-layout.md)
