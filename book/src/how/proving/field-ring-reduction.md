@@ -446,16 +446,62 @@ explains how this claim is row-batched and fused with the other Stage-2 terms.
 
 The base-field path follows the reduction above:
 
-1. [`prepare_opening_point`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-types/src/proof/batch.rs#L687-L750)
+1. **Prepare the opening weights.**
+   [`prepare_opening_point`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-types/src/proof/batch.rs#L687-L750)
    constructs $Q_p$, $B_b$, and $P$.
-2. [`evaluate_claims_at_prepared_point`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/core/fold_kernels.rs#L61-L89)
-   returns the position-folded rings $E_b$ and the virtual ring $Y$.
-3. [`scalar_opening_from_folded_ring`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/core/fold_kernels.rs#L224-L274)
+2. **Evaluate the ring polynomial.**
+   [`evaluate_claims_at_prepared_point`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/core/fold_kernels.rs#L61-L89)
+   returns the position-folded rings $E_b$ and the temporary ring $Y$.
+3. **Recover the scalar evaluation.**
+   [`scalar_opening_from_folded_ring`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/core/fold_kernels.rs#L224-L274)
    computes $\operatorname{TraceOpen}_P(Y)$.
-4. [`build_evaluation_trace_weights`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/sumcheck/relation_range_image/evaluation_trace.rs#L101-L168)
-   constructs $T(x)$ on the committed $\hat e$ segment.
-5. [`accumulate_fused_relation_trace`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/sumcheck/relation_range_image/mod.rs#L281-L300)
-   hands the relation to the fused Stage-2 sumcheck.
+4. **Prepare the trace factors.**
+   [`prepare_evaluation_trace_group_parameters`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-types/src/trace_weight/evaluation_trace.rs#L162-L269)
+   prepares the block point underlying $B_b$, the gadget weights $G_h$, and
+   the inner trace weights $J_\ell$.
+5. **Construct the trace weights.**
+   [`build_evaluation_trace_weights`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/sumcheck/relation_range_image/evaluation_trace.rs#L101-L168)
+   combines those factors with the claim coefficients and physical $\hat e$
+   locations to construct $T(x)$.
+6. **Fuse the Stage-2 relation.**
+   [`accumulate_fused_relation_trace`](https://github.com/LayerZero-Labs/akita/blob/b104dae6c672f406b676b04c47e00f4249669ba5/crates/akita-prover/src/protocol/sumcheck/relation_range_image/mod.rs#L281-L300)
+   adds the trace relation to the fused Stage-2 sumcheck.
+
+The main data flow is:
+
+```text
+opening point r
+      |
+      v
+PreparedOpeningPoint { Q_p, B_b, P }
+      |
+      v
+OpeningFoldOutput
+|-- folded: [E_b] -- digit decomposition --> e_hat in witness w
+`-- eval: Y ------- TraceOpen_P ----------> v_tr
+                                                  |
+                                                  v
+PreparedFold
+|-- evaluation_trace_claim: v_tr
+|-- evaluation_trace_points: prepared opening points
+|-- evaluation_trace_claim_coefficients: c_q
+`-- witness: contains E_b and e_hat
+      |
+      v
+prepare_evaluation_trace_group_parameters
+      |
+      `-- public factors B_b, G_h, J_l
+                         |
+                         v
+build_evaluation_trace_weights
+      |
+      `-- T(x) on the committed e_hat segment
+                         |
+                         v
+accumulate_fused_relation_trace
+      |
+      `-- Stage 2 proves v_tr = sum_x w(x) T(x)
+```
 
 The main values are:
 
@@ -463,11 +509,31 @@ The main values are:
 |---|---|
 | `PreparedOpeningPoint::ring_opening_point.position_weights` | $Q_p$ |
 | `PreparedOpeningPoint::ring_opening_point.live_block_weights` | $B_b$ |
-| `PreparedOpeningPoint::packed_inner_point` | $P$ |
+| `PreparedOpeningPoint::packed_inner_point` | $P(X)$ |
 | `OpeningFoldOutput::folded` | $E_0,E_1,\ldots$ |
-| `OpeningFoldOutput::eval` | $Y$ |
-| `trace_eval_target` | $\operatorname{TraceOpen}_P(Y)$ |
-| `EvaluationTraceWeights` | $T$ |
+| `OpeningFoldOutput::eval` | temporary $Y(X)$ |
+| `PreparedEvaluationTraceClaim::claimed_evaluation` | $v_{\mathrm{tr}}=\operatorname{TraceOpen}_P(Y)$ |
+| `PreparedEvaluationTraceClaim::claim_coefficients` | claim-batching coefficients $c_q$ |
+| `RingRelationGroupWitness::e_folded` | position-folded rings $E_b$ |
+| `RingRelationGroupWitness::e_hat` | digit rings $\hat e_{b,h}(X)$ |
+| `PreparedFold::evaluation_trace_claim` | $v_{\mathrm{tr}}$ carried into Stage 2 |
+| `PreparedFold::evaluation_trace_points` | prepared $P$, $Q$, and $B$ for each group |
+| `PreparedFold::evaluation_trace_claim_coefficients` | $c_q$ carried into trace-weight construction |
+| `EvaluationTraceGroupParameters::block_opening_point` | block point from which $B_b$ is evaluated |
+| `EvaluationTraceGroupParameters::opening_digit_weights` | $G_h$ |
+| `EvaluationTraceGroupParameters::inner_trace` | $J_\ell$, equal to $I_\ell$ in the base-field case |
+| `EvaluationTraceWeights` | $T(x)$ |
+
+The temporary ring $Y$ is used only to compute $v_{\mathrm{tr}}$; it is not
+stored in `PreparedFold` or sent to the verifier. Stage 2 instead proves
+
+$$
+v_{\mathrm{tr}}
+=
+\sum_x w(x)T(x)
+$$
+
+directly from the committed digit witness.
 
 ## Base-field polynomial at an extension-field point
 
