@@ -21,7 +21,9 @@ Akita will support a direct opening mode for base-field committed tables opened
 at extension-field points. The mode keeps one coefficient axis explicit as a
 smaller cyclotomic **carrier ring** and contracts the other coefficient axes
 directly over the extension field. Fold challenges live in that smaller ring
-and embed sparsely into the ambient A ring.
+and embed sparsely into the ambient A ring. The challenge dimension and the
+ambient A-ring dimension are independent schedule choices, subject to the
+divisibility condition below.
 
 For extension-field presets, generated schedules MUST use this direct mode at
 absolute fold levels 0 and 1. The planner may change the A dimension or the
@@ -30,11 +32,18 @@ extension-opening reduction (EOR) at either level. A catalog row with no
 feasible direct candidate is unsupported until its geometry or audited
 challenge family changes.
 
-At levels 2 and later, the planner MAY compare direct carrier opening against
-the current EOR path. The terminal fold retains EOR in the first implementation
-slice. This deliberate boundary lets later folds keep EOR when small ambient
-rings, challenge norms, A-rank granularity, or terminal response geometry make
-the carrier path worse.
+The direct mode MUST be representable at every later fold, including the
+terminal fold. Nonterminal folds keep its coefficient planes in the ordinary
+recursively committed witness. A transparent direct terminal reveals those
+planes. The planner MAY compare that cost with the current EOR/Hachi terminal
+while the coefficient-native terminal-compression problem below remains open.
+
+The planner MUST NOT force later folds onto a small uniform-ring suffix. At
+every fold it retains the supported A-dimension ladder allowed by the incoming
+geometry, even when B and D use smaller rings. In particular, increasing `d_A`
+does not increase a direct partial when `s` is unchanged. The planner SHOULD
+normally keep the smallest admitted `s` while increasing `d_A` when the larger
+ring reduces the secure A rank without increasing the exact output dimension.
 
 This specification is stacked on [PR #383](https://github.com/LayerZero-Labs/akita/pull/383),
 at commit `38ab14924e6539875abab97b706970baaa973ce3`. PR #383's dyadic B
@@ -62,26 +71,30 @@ extension field. This viewpoint has three useful consequences:
 The change is not unconditionally cheaper. A smaller carrier requires a
 different sparse challenge family. Meeting the same entropy target can increase
 the challenge's norm, which can enlarge the folded witness, the secure A rank,
-and the `t` part of the next witness. Near the recursive tail, the larger A ring
-needed to admit a carrier can also cost more than EOR. The planner therefore
-owns the choice after the first two levels.
+and the `t` part of the next witness. Near the recursive tail, a direct
+small-field opening may also require a larger A ring. This does not by itself
+make the candidate worse: a larger ring can need proportionally fewer A rows.
+The planner must compare exact field-coordinate counts and the complete suffix,
+not ring dimension alone.
 
 ## Scope and notation
 
-The equations below describe one polynomial and one commitment group. Existing
-claim batching and multi-group row coefficients apply outside these equations
-and do not change them.
+The direct-mode equations below describe one polynomial and one commitment
+group. Existing claim batching and multi-group row coefficients apply outside
+these equations and do not change them.
 
 | Symbol | Meaning |
 |---|---|
 | `K` | Base coefficient field `F_q` |
 | `E` | Challenge and evaluation field, with extension degree `k = [E:K]` |
 | `d_A` | Ambient A-ring dimension |
+| `n_A` | Secure output rank of the A matrix |
 | `s` | Carrier-ring dimension selected by the schedule |
-| `h` | Packing gain `d_A / (k s)` |
+| `h` | Native-mode packing gain `d_A / (k s)` |
 | `R` | Ambient ring `K[X]/(X^{d_A}+1)` |
 | `S` | Challenge carrier `K[Y]/(Y^s+1)` |
 | `C` | Extension carrier `E[Y]/(Y^s+1)` |
+| `beta_t` | Element `t` of Akita's fixed canonical `K`-basis of `E` |
 
 Every admitted direct candidate satisfies
 
@@ -109,12 +122,112 @@ c(X^(k h)) = sum_(j < s) c_j X^(k h j).
 The implementation MUST use this canonical embedding. It MUST NOT search over
 coefficient permutations or alternative carrier embeddings.
 
+### Final architecture boundary
+
+There is one coefficient-native opening relation. At a nonterminal fold, its
+partial digits are part of the recursively opened next witness. At a
+transparent terminal, its `P B k s` coefficients are revealed. Merely replacing
+that reveal by an SIS image and local sum-checks is unsound, as explained
+below: the final hidden-witness evaluation still needs an authenticated
+opening.
+
+The native relation MUST work at the root, recursive folds, and terminal fold.
+The descriptor MUST bind `k`, `s`, the extension-coordinate order, and the
+selected terminal path.
+
+The current tensor EOR followed by Hachi `psi` packing and a trace check remains
+the supported compressed terminal. It can be removed only after
+generated-catalog evidence shows that every supported terminal can afford its
+transparent coefficient-native payload.
+
+### Why the tail is the hard case
+
+The current audited sparse challenge ladder starts at dimension 64. A native
+candidate using that smallest challenge therefore carries
+
+```text
+k s = 64       for fp128,
+k s = 128      for fp64,
+k s = 256      for fp32.
+```
+
+This is independent of `d_A`. Thus fp32 can keep `s = 64` and use `d_A = 256`,
+while fp128 can keep `s = 64` with any admitted `d_A` in `{64, 128, 256}`. The
+larger A ring is often harmless when its secure rank falls proportionally. For
+example, A dimension 64 at rank 4 and A dimension 256 at rank 1 both output 256
+base-field coordinates; if their remaining exact successor geometry is the
+same, the dimension-256 candidate is preferred.
+
+The PR #383 tables also show why the full ladder, rather than a rule that always
+raises `d_A`, is necessary. A representative fp32 terminal has 128 A-input
+columns at coefficient bound `2^20 - 1`. The audited Q32 table gives:
+
+| A dimension | Secure rank | A image width |
+|---:|---:|---:|
+| 128 | 8 | 1,024 |
+| 256 | 5 | 1,280 |
+| 512 | 2 | 1,024 |
+
+At dimension 256, rank 4 supports only 124 columns, so the fifth row makes that
+candidate worse. Dimension 512 recovers the same A image width as dimension
+128 and can carry the native fp32 `s = 64` challenge. The exact tail comparison
+is then between transparent native partials and the current EOR/Hachi path. A
+forced dimension-128 suffix cannot make that comparison.
+
+The terminal comparison is therefore between the transparent dimension-64
+coefficient carrier and the current EOR/Hachi path. Smaller challenge carriers
+and hidden coefficient-native terminals are outside this specification.
+
+## Terminal compression boundary
+
+Suppose the prover decomposes the native planes into short digits `ehat`, binds
+
+```text
+v_D = D ehat,
+```
+
+and then runs range and relation sum-checks without revealing `ehat`. Those
+sum-checks end at a random point `r_sc` and require the claimed value
+`ehat(r_sc)`. The verifier cannot derive that value from `v_D`.
+
+This is not repaired by including `D ehat = v_D` inside the same sum-check. A
+cheating prover can choose the last value after seeing `r_sc` and make the
+univariate transcript close without committing to one global low-degree table.
+Stage 1 has the same final-oracle problem. The D image gives computational
+binding *if two short preimages are already known*; it is not by itself a
+polynomial-opening protocol.
+
+The current nonterminal protocol supplies the missing step by putting `ehat`
+inside the recursively committed next witness and opening that commitment at
+the Stage-2 point. The current transparent terminal supplies it by revealing
+the witness, from which the verifier computes the final evaluation directly.
+
+A sound no-raw-`e` terminal therefore MUST provide all of the following:
+
+1. bind the coefficient planes before the block-fold challenges;
+2. prove the bound witness is short;
+3. authenticate every final witness evaluation requested by the range and
+   relation proofs; and
+4. enforce native carrier consistency and the exact `E`-valued opening on that
+   same authenticated witness.
+
+Until item 3 has a concrete proof, the planner MUST NOT price the 512-byte D
+image and local sum-check messages as a complete replacement for raw `e`. The
+previous 1,744-byte estimate omitted this opening argument and is invalid.
+
+The terminal paths currently safe to price are:
+
+- transparent native planes at the admitted carrier dimension; and
+- the current EOR/Hachi path.
+
 ## Current protocol
 
 For each live claim/block pair, the current prover produces a partial opening
-`e_i` as a full element of `R`, hence `d_A` base-field coordinates. It gadget
-decomposes those coordinates into `e_hat`, commits the D image of `e_hat`, and
-absorbs the opening payload before sampling the sparse fold challenges `c_i`.
+`e_i` as a full element of `R`, hence `d_A` base-field coordinates. At a
+nonterminal fold, it gadget-decomposes those coordinates into `e_hat`, commits
+the D image, and absorbs that payload before sampling the sparse fold
+challenges `c_i`. The transparent terminal is the exception: it drops the D
+rows and reveals the reduced `e_i` coefficients as raw field elements.
 
 The two A-native relations are, schematically,
 
@@ -134,10 +247,11 @@ connect the ring partials to the original scalar opening. The ring-switch
 verifier evaluates every sparse challenge once at `X = alpha` and reuses that
 value in the consistency and A contractions.
 
-This specification changes all four italicized facts: a direct partial is not a
-full `R` element; the consistency row uses the carrier modulus; the scalar row
-uses direct coefficient weights; and the carrier and A relations require
-different evaluations of the same challenge.
+This specification changes four facts: a direct partial is not a full `R`
+element; the consistency row uses the carrier modulus; the scalar row uses
+direct coefficient weights; and the carrier and A relations require different
+evaluations of the same challenge. At the terminal, the direct path is
+transparent.
 
 ## Direct coefficient packing
 
@@ -231,11 +345,13 @@ coefficient applied outside the displayed equation. It has no cyclotomic
 quotient. The implementation SHOULD name its prepared weights as direct
 coefficient-opening weights rather than trace weights.
 
-EOR groups at later levels retain the current evaluation-trace path. A grouped
-root has one schedule-owned carrier geometry per opening group, in canonical
-root group order. The precommitted profile freezes the commitment geometry; the
-root schedule separately freezes how that group is opened. The verifier MUST
-NOT apply one group's coefficient layout or carrier dimension to another group.
+At a nonterminal fold, this equation is evaluated from digits authenticated
+through the next recursive witness. At a transparent terminal, it is evaluated
+directly from the revealed coefficient planes. A grouped root has one
+schedule-owned opening geometry per group, in canonical root group order. The
+precommitted profile freezes the commitment geometry; the root schedule
+separately freezes how that group is opened. The verifier MUST NOT apply one
+group's coefficient layout or carrier dimension to another group.
 
 ## Fold challenges and the two relation rings
 
@@ -364,18 +480,19 @@ MUST match multiplication by the embedded challenge in `R` exactly.
 B slicing from PR #383 is unchanged. B continues to bind `t_hat` using one
 physical matrix reused across its selected dyadic slices.
 
-D continues to bind the gadget digits of the partial openings. In direct mode,
-however, its logical input contains `k s`, not `d_A`, base-field coordinates per
-claim/block. The first implementation requires
+D continues to bind the gadget digits of the partial openings at nonterminal
+folds. A transparent terminal has no D role for `e`: it reveals the `k s`
+base-field coordinates per claim/block. For nonterminal direct folds, the first
+implementation requires
 
 ```text
 d_D divides k s.
 ```
 
 This avoids a second padding convention. The number of D-role subcolumns per
-partial is `k s / d_D`. D ranks, compression source widths, and H compression
-geometry MUST be recomputed from that exact width. They MUST NOT be obtained by
-scaling an old `d_A` price after rank selection.
+partial is `selected_partial_width / d_D`. D ranks, compression source widths,
+and H compression geometry MUST be recomputed from that exact width. They MUST
+NOT be obtained by scaling an old `d_A` price after rank selection.
 
 ## Ring switching
 
@@ -401,7 +518,7 @@ protocol error except in the degenerate case `k h = 1`.
 
 ### Evaluating the carrier quotient
 
-At `Y = alpha`, the consistency check is
+In native mode, the consistency check at `Y = alpha` is
 
 ```text
 sum_i c_i(alpha) e_i(alpha)
@@ -445,8 +562,8 @@ H          = (cyclic - negacyclic) / 2.
 
 These identities still apply because the base characteristic is odd. They do
 not, by themselves, make a new persistent cache useful. Current sparse
-challenge products already compute only the high half. Direct carrier mode
-SHOULD extend that high-half kernel to `k` length-`s` coordinate planes.
+challenge products already compute only the high half. Native mode SHOULD
+extend that high-half kernel to `k` length-`s` coordinate planes.
 
 The existing cyclic/negacyclic setup caches for `A z` remain useful and remain
 ambient. This change MUST NOT replace them with extension-field setup matrices.
@@ -455,17 +572,18 @@ requirements MUST be derived from the selected mode.
 
 ## Soundness requirements
 
-This section states the reduction obligations introduced by the new mode. It
+This section states the security obligations introduced by the new mode. It
 does not replace the existing MSIS binding proof for A, B, D, F, and H.
 
 ### Transcript order
 
-For each direct group, the transcript MUST enforce this dependency order:
+For each native group, the transcript MUST enforce this dependency order:
 
 1. Bind the instance, schedule, mode, dimensions, coefficient layout, group
    layout, opening point, and original commitment.
 2. Bind the complete D/H payload that commits to every base-field coordinate of
-   every `e_i`.
+   every `e_i`; at a transparent terminal, bind the canonical raw `e` segment
+   instead.
 3. Sample the carrier challenges `c_i` at dimension `s`.
 4. Bind the challenge-dependent folded witness, A/B data, carrier quotient, and
    next-witness commitment.
@@ -509,7 +627,7 @@ After subtracting the accepted A relations,
 A (z - z') = delta(X^(k h)) t_j       in R^(n_A).
 ```
 
-After subtracting the accepted carrier consistency relations,
+In native mode, subtracting the accepted carrier consistency relations gives
 
 ```text
 L(G(z - z')) = delta(Y) e_j           in C.
@@ -665,10 +783,11 @@ length-128 base-field coordinate planes, or 512 coordinates total, instead of
 1,024. The ring-switch verifier computes `c(alpha)` for the carrier row and
 `c(alpha^8)` for the A rows.
 
-The `s=64` choice gives a fourfold coordinate reduction but a heavier challenge.
-The `s=256` choice gives no coordinate reduction, yet can still be profitable
-because it removes EOR. The planner must compare those effects rather than
-assuming that the smallest `s` wins.
+The `s=64` choice gives a fourfold smaller native partial than `s=256`, but uses
+a heavier carrier challenge. At a transparent terminal that partial is raw
+wire. At a nonterminal it changes the digit count, D width, and successor
+witness. The planner must compare both effects rather than assuming that the
+smallest `s` wins.
 
 ## Planner contract
 
@@ -678,8 +797,12 @@ Each opening group has one frozen opening mode:
 
 ```rust
 enum OpeningGroupMode {
-    ExtensionOpeningReduction,
     CoefficientCarrier { carrier_dimension: usize },
+}
+
+enum TerminalOpeningPath {
+    TransparentCoefficientCarrier,
+    CurrentEorHachi,
 }
 ```
 
@@ -687,6 +810,11 @@ Equivalent naming is acceptable, but the mode and `carrier_dimension` MUST be
 typed protocol data. They MUST appear in runtime schedules, generated rows,
 canonical descriptors, catalog identity, setup-prefix identity, proof-size
 reports, and transcript binding.
+
+The terminal path is level-wide. No `CommittedCoefficientCarrier` variant is
+admitted: a D image plus local sum-checks does not authenticate their final
+hidden-witness evaluations. A future variant MUST specify and price that
+opening argument before it can enter this enum.
 
 A scalar or recursive fold has one opening group and therefore one entry. A
 grouped root stores one entry per group in `OpeningClaimsLayout::root_group_order`.
@@ -723,13 +851,20 @@ For `k = 1`, EOR is invalid and contributes no bytes. The planner MAY still use
 `s < d_A` to reduce partial and quotient coordinates. The full-ring baseline is
 the direct candidate `s = d_A`, `h = 1`.
 
+A transparent-terminal candidate is admitted only if every group uses the
+canonical native coefficient layout and every raw coefficient count is exactly
+representable. The existing EOR/Hachi terminal remains admitted under its
+current checks. The planner MUST reject any candidate that prices only a D
+image and local sum-checks as a no-raw-`e` terminal.
+
 ### Level policy
 
 For presets with `k > 1`:
 
-- absolute levels 0 and 1 enumerate direct candidates only;
-- nonterminal levels 2 and later enumerate both direct and EOR candidates;
-- the terminal uses EOR in the first implementation.
+- absolute levels 0 and 1 enumerate native direct candidates only;
+- every nonterminal level enumerates native direct candidates only; and
+- the terminal compares transparent coefficient-carrier candidates with the
+  current EOR/Hachi path under the same complete-suffix objective.
 
 The absolute level is the same level used by PR #383 B-slice eligibility. A
 precommitted profile freezes its commitment shape but receives its group-local
@@ -738,11 +873,52 @@ depends on a producing fold freezes that fold's complete opening-mode vector. A
 later consumer MUST validate that frozen shape; it MUST NOT reinterpret stored
 partial or quotient coordinates under a different carrier.
 
+### Independent carrier and A dimensions
+
+For native mode, the carrier dimension `s` controls challenge entropy and the
+`k s` partial and quotient widths. The A dimension `d_A` controls the ambient A
+rows. Once `s` is fixed, changing `d_A` changes only the packing gain and
+ambient geometry; it MUST NOT enlarge the native partial or carrier quotient.
+
+The independent `d_A`/`s` rule also applies at the transparent terminal. The
+current EOR/Hachi path is priced from its own audited geometry rather than
+being modeled as a coefficient-carrier encoding.
+
+The current `AdaptiveDimension` policy searches role-specific dimensions for
+two levels and then switches to a small uniform suffix. That suffix rule MUST
+NOT be used for the final carrier planner. Every nonterminal and terminal state
+MUST enumerate every supported `d_A` that:
+
+- does not exceed the incoming A-dimension ceiling;
+- is compatible with the selected mode and `s`;
+- admits the required A challenge embedding and kernels; and
+- has an audited secure rank for the exact candidate bounds.
+
+B and D remain independent role dimensions and MAY stay below `d_A`. The
+planner MUST NOT raise them merely because a larger A ring wins.
+
+For each retained candidate, the report MUST expose both the A image width
+
+```text
+n_A d_A
+```
+
+and the exact successor-witness field-coordinate count. A larger-`d_A`
+candidate MUST remain on the frontier whenever neither count is greater than
+for a smaller-`d_A` candidate with the same mode, `s`, challenge family, and
+input state. If both counts and every higher-priority component of the catalog
+objective tie, the planner MUST choose the larger `d_A`, hence the lower-rank
+representation. This rule makes dimension 256 at rank 1 win over dimension 64
+at rank 4 when the rest of the exact geometry is unchanged; it does not assume
+that every larger ring wins.
+
 ### Exact pricing
 
 For every candidate, the planner MUST recompute at least:
 
-- EOR bytes, which are zero in direct mode;
+- removed current EOR bytes;
+- transparent raw-`e` bytes;
+- complete current EOR/Hachi terminal bytes;
 - partial coordinate count and opening gadget depth;
 - D input width, secure D rank, H source, and compression geometry;
 - carrier quotient coordinates and quotient digit count;
@@ -755,9 +931,11 @@ For every candidate, the planner MUST recompute at least:
 - successor witness length and the complete suffix; and
 - terminal response geometry.
 
-The proof-size report MUST show the selected mode, `s`, `h`, removed EOR bytes,
-partial coordinates, carrier quotient coordinates, and net proof/setup change
-at every level.
+The proof-size report MUST show the selected mode, `s`, partial coordinates,
+carrier quotient coordinates, and net proof/setup change at every level.
+Every row MUST show `h` and removed current EOR bytes. Terminal rows MUST show
+the exact raw native payload and complete current EOR/Hachi payload. The report
+MUST NOT list the invalid 1,744-byte subtotal as an available candidate.
 
 ### B slicing interaction
 
@@ -773,7 +951,7 @@ B width depends on `t_hat`, and `t_hat` depends on the carrier challenge norm,
 the selected A dimension, and secure A rank. Candidate construction MUST
 therefore use this order:
 
-1. choose opening mode, `d_A`, `s`, and the challenge family;
+1. choose opening mode, `d_A`, `s`, and the carrier challenge family;
 2. derive fold bounds, A rank, `z`, and `t_hat` geometry;
 3. enumerate and locally prune PR #383 B slice counts;
 4. derive D/H and B/F compression plans;
@@ -785,14 +963,18 @@ profitability rule remain unchanged.
 
 ### Search-space control
 
-This change MUST NOT create an unbounded product of mode, `s`, `h`, layout, and
-B slicing choices. The planner MUST:
+This change MUST NOT create an unbounded product of mode, `s`, layout, and B
+slicing choices. The planner MUST:
 
-- derive `h` from `(k,d_A,s)`;
+- derive `h` from `(k,d_A,s)` for every coefficient-carrier candidate;
 - use one canonical coefficient layout and embedding;
 - use a fixed audited list of `s` values;
 - omit EOR entirely at L0/L1;
+- enumerate the full admitted A-dimension ladder at every later level instead
+  of switching to a uniform suffix;
 - apply security and divisibility admission before rank lookup;
+- retain only undominated `(d_A, n_A d_A, successor length)` geometries for a
+  fixed mode and carrier configuration;
 - apply PR #383's local B-slice pruning after A/`t` geometry is known;
 - retain only the existing objective's deterministic Pareto winners at each
   bounded DP state; and
@@ -808,6 +990,8 @@ B slicing choices. The planner MUST:
 - Represent the carrier consistency row as one logical row with carrier
   dimension `s` and extension coordinate width `k`.
 - Extend witness/address layouts for `k s` partial and quotient coordinates.
+- Represent the transparent terminal payload as exactly `P B k s` canonical
+  base-field coordinates.
 - Generalize proof-size and successor-witness sizing by selected mode.
 - Keep malformed verifier inputs on typed `AkitaError` or
   `SerializationError` paths.
@@ -831,6 +1015,8 @@ B slicing choices. The planner MUST:
 - Split carrier and ambient challenge evaluations in ring-switch preparation.
 - Replace the trace-specific Stage-2 term with the direct coefficient-opening
   term for direct groups.
+- Keep the direct terminal transparent. Do not construct a D-only hidden tail
+  without a separately specified authenticated opening argument.
 - Preserve current cyclic/negacyclic A setup caches.
 
 ### `akita-verifier`
@@ -838,18 +1024,26 @@ B slicing choices. The planner MUST:
 - Reconstruct the direct scalar-opening row from `r_B`, `r_tail`, the canonical
   extension basis, and opening gadget weights.
 - Evaluate carrier quotient planes with denominator `alpha^s+1`.
-- Evaluate the same challenge at `alpha` and `alpha^(k h)` for its two roles.
+- For native groups, evaluate the same challenge at `alpha` and
+  `alpha^(k h)` for its two roles.
+- Recompute every terminal direct relation from the canonical raw coefficient
+  planes. Reject a hidden coefficient-tail encoding that lacks an authenticated
+  final opening.
 - Reject mode/dimension/layout mismatches before allocation.
 - Preserve the no-panic verifier contract.
 
 ### `akita-planner`, `akita-schedules`, and `akita-config`
 
 - Add bounded carrier candidates and the level policy above.
+- Replace the two-level A search plus uniform suffix with per-level A-ladder
+  enumeration and exact dominance pruning. B and D remain role-specific.
 - Recompute exact ranks, setup, compression, proof bytes, and successors.
 - Regenerate every affected fp32/fp64 catalog on top of PR #383.
 - Add report columns for opening mode and carrier economics.
-- Keep fp128 EOR-free and allow later `s < d_A` exploration without making it
-  part of the first cutover's success criterion.
+- Report the transparent-native and current Hachi/EOR terminal totals. Keep the
+  invalid D-plus-local-sum-check subtotal out of candidate generation.
+- Keep fp128 EOR-free, hold `s = 64` across larger A dimensions where it wins,
+  and apply the same terminal search policy as the extension-field presets.
 
 ## Acceptance criteria
 
@@ -869,6 +1063,9 @@ B slicing choices. The planner MUST:
       packed-extension reference.
 - [ ] Honest direct proofs verify at L0 and L1 for fp32 degree 4 and fp64 degree
       2.
+- [ ] Transparent-terminal parsing contains exactly `P B k s` canonical
+      base-field coordinates and reproduces the direct extension-field opening
+      for every claim and group.
 
 ### Soundness and transcript
 
@@ -876,7 +1073,8 @@ B slicing choices. The planner MUST:
       pairwise-difference unit certificate for `S`.
 - [ ] The certificate checks the difference family's exact coefficient/norm
       envelope.
-- [ ] Partial D/H payloads are transcript-bound before carrier challenge draws.
+- [ ] Nonterminal partial D/H payloads and transparent raw `e` are
+      transcript-bound before their carrier challenge draws.
 - [ ] Carrier quotient and next-witness data are bound before `alpha`.
 - [ ] Mode, `s`, challenge configuration, coefficient layout, and group identity
       change the descriptor/transcript bytes.
@@ -884,6 +1082,9 @@ B slicing choices. The planner MUST:
       tests fail when either is substituted for the other.
 - [ ] A nonzero coordinate-plane numerator is detected by the packed
       `E[Y]` ring-switch oracle.
+- [ ] A verifier test rejects any terminal descriptor that claims a hidden
+      D-bound coefficient tail without an authenticated opening proof.
+- [ ] The direct-mode theorem adds no `1/|K|` coordinate-projection term.
 - [ ] Multi-fork extraction and total soundness-error accounting are documented
       alongside the implementation.
 - [ ] Malformed mode/dimension/coordinate counts return typed errors without
@@ -892,9 +1093,15 @@ B slicing choices. The planner MUST:
 ### Planner and sizing
 
 - [ ] Generated fp32/fp64 schedules contain no EOR mode at absolute L0 or L1.
-- [ ] L2+ direct and EOR candidates are both priced where locally feasible.
-- [ ] The first terminal implementation remains on the existing EOR path.
-- [ ] `d_D` not dividing `k s` rejects before matrix/rank construction.
+- [ ] Every nonterminal uses the native direct relation; the terminal compares
+      transparent native candidates with the current EOR/Hachi baseline.
+- [ ] The planner has no D-only hidden coefficient-tail candidate.
+- [ ] Later folds enumerate the full admitted A-dimension ladder rather than a
+      uniform suffix, while retaining independent B and D dimensions.
+- [ ] Reports show `n_A d_A` and exact successor length for every retained A
+      geometry and select the larger `d_A` on an otherwise exact tie.
+- [ ] `d_D` not dividing the selected native or hidden-digit width rejects
+      before matrix/rank construction.
 - [ ] Exact D/H and A/B/F ranks are recomputed from carrier geometry and norms.
 - [ ] PR #383 B slicing is enumerated only after carrier-derived A/`t` geometry.
 - [ ] Bounded DP output matches an unpruned oracle on small search fixtures.
@@ -910,14 +1117,16 @@ B slicing choices. The planner MUST:
 
 - [ ] Direct partial and carrier quotient allocations contain exactly `k s`
       base-field coordinates per semantic item before digits.
+- [ ] Transparent-terminal allocations and serialization contain exactly
+      `P B k s` base-field coordinates.
 - [ ] Carrier high-half construction does not materialize full extension-field
       convolution tables.
 - [ ] Existing A cyclic/negacyclic setup caches remain shared and correct.
 - [ ] D/H cache requirements use the selected carrier width and do not retain
       old `d_A`-wide buffers.
 - [ ] Profile output records prover time, verifier time, peak memory, setup
-      field elements, proof bytes, and per-level witness sizes for direct versus
-      EOR candidates.
+      field elements, proof bytes, and per-level witness sizes for transparent
+      native versus current EOR/Hachi terminal candidates.
 - [ ] A packed-`E` verifier Horner loop is adopted only if it beats the canonical
       coordinate-plane loop without changing bytes or arithmetic results.
 
@@ -936,7 +1145,14 @@ B slicing choices. The planner MUST:
 - No second independent challenge for the A rows.
 - No pure extension-field commitment or setup matrix.
 - No claim that the smallest carrier is always optimal.
-- No removal of EOR from the first terminal implementation.
+- No claim that flattening a native `k s` carrier and adding four public rows
+  yields a sound `s`-coordinate prechallenge carrier.
+- No claim that a D image plus local sum-checks forms a complete opening proof;
+  short-preimage binding does not authenticate a final multilinear evaluation.
+- No use of the rejected ring-valued interpolation described below: its
+  opening operators are only `K`-linear and do not preserve degree over `S`.
+- No requirement that a production schedule retain EOR when a fully priced
+  transparent native terminal candidate wins.
 - No change to PR #383's B-slice count set, dyadic partition, or 8 KiB
   compression-source limit.
 - No backward-compatible decoding of schedules or proofs that predate this
@@ -949,8 +1165,8 @@ The implementation PR must fold stable protocol prose into:
 
 - `book/src/how/proving/root-fold-ring-switch.md` for the carrier relation and
   two challenge evaluations;
-- `book/src/how/proving/extension-opening-reduction.md` for the level-dependent
-  EOR cutover;
+- `book/src/how/proving/extension-opening-reduction.md` for L0/L1 removal and
+  the unresolved terminal migration boundary;
 - `book/src/how/configuration.md` for planner candidates and reports;
 - `book/src/foundations/rings-and-fields.md` for the carrier embedding and unit
   condition; and
@@ -964,6 +1180,8 @@ this spec moves through `implemented` to the normal archive workflow in
 
 - [B commitment slicing](commitment-slicing.md), PR #383 baseline and B-planner
   interaction.
+- [Extension-field opening batching](extension-field-opening-batching.md),
+  tensor EOR and the transformed-commitment soundness boundary.
 - [Ring-dimension and challenge cutover](ring-dim-challenge-cutover.md), current
   production sparse families and role dimensions.
 - [EOR streamed prover](eor-streamed-prover.md), current EOR prover path and
