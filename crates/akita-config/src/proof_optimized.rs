@@ -422,6 +422,7 @@ macro_rules! impl_proof_optimized_preset {
             $selection_policy
         }
     };
+    (@schedule_catalog none) => {};
     (@schedule_catalog ($feat:literal, $family:literal, $table:ident)) => {
         fn schedule_catalog() -> Option<akita_schedules::GeneratedScheduleTable> {
             #[cfg(feature = $feat)]
@@ -437,11 +438,14 @@ macro_rules! impl_proof_optimized_preset {
     (@ring_dimension_schedule_mode $mode:expr) => {
         const RING_DIMENSION_SCHEDULE_MODE: akita_schedules::RingDimensionScheduleMode = $mode;
     };
+    ($cfg:ident, $field:ty, $ext_field:ty, $family:expr, $field_bits:expr, $log_commit_bound:expr, fold_norms = $fold_norms:expr, ring_dimension_schedule_mode = $mode:expr) => {
+        $crate::impl_proof_optimized_preset!(@core $cfg, $field, $ext_field, $family, $field_bits, $log_commit_bound, $fold_norms, none, ring_dimension_schedule_mode = $mode);
+    };
     ($cfg:ident, $field:ty, $ext_field:ty, $family:expr, $field_bits:expr, $log_commit_bound:expr, fold_norms = $fold_norms:expr, schedules = ($feat:literal, $family_name:literal, $table:ident), ring_dimension_schedule_mode = $mode:expr) => {
-        $crate::impl_proof_optimized_preset!(@core $cfg, $field, $ext_field, $family, $field_bits, $log_commit_bound, $fold_norms, table, $feat, $family_name, $table, ring_dimension_schedule_mode = $mode);
+        $crate::impl_proof_optimized_preset!(@core $cfg, $field, $ext_field, $family, $field_bits, $log_commit_bound, $fold_norms, ($feat, $family_name, $table), ring_dimension_schedule_mode = $mode);
     };
     ($cfg:ident, $field:ty, $ext_field:ty, $family:expr, $field_bits:expr, $log_commit_bound:expr, fold_norms = $fold_norms:expr, schedules = ($feat:literal, $family_name:literal, $table:ident), selection_policy = $selection_policy:expr, ring_dimension_schedule_mode = $mode:expr) => {
-        $crate::impl_proof_optimized_preset!(@core $cfg, $field, $ext_field, $family, $field_bits, $log_commit_bound, $fold_norms, table, $feat, $family_name, $table, selection_policy = $selection_policy, ring_dimension_schedule_mode = $mode);
+        $crate::impl_proof_optimized_preset!(@core $cfg, $field, $ext_field, $family, $field_bits, $log_commit_bound, $fold_norms, ($feat, $family_name, $table), selection_policy = $selection_policy, ring_dimension_schedule_mode = $mode);
     };
     (@options ring_dimension_schedule_mode = $mode:expr) => {
         $crate::impl_proof_optimized_preset!(@ring_dimension_schedule_mode $mode);
@@ -451,7 +455,7 @@ macro_rules! impl_proof_optimized_preset {
         $crate::impl_proof_optimized_preset!(@ring_dimension_schedule_mode $mode);
         $crate::impl_proof_optimized_preset!(@selection_policy $selection_policy);
     };
-    (@core $cfg:ident, $field:ty, $ext_field:ty, $family:expr, $field_bits:expr, $log_commit_bound:expr, $fold_norms:expr, table, $feat:literal, $family_name:literal, $table:ident, $($options:tt)*) => {
+    (@core $cfg:ident, $field:ty, $ext_field:ty, $family:expr, $field_bits:expr, $log_commit_bound:expr, $fold_norms:expr, $catalog:tt, $($options:tt)*) => {
         impl $crate::CommitmentConfig for $cfg {
             type Field = $field;
             type ExtField = $ext_field;
@@ -521,7 +525,7 @@ macro_rules! impl_proof_optimized_preset {
                 }
             }
 
-            $crate::impl_proof_optimized_preset!(@schedule_catalog ($feat, $family_name, $table));
+            $crate::impl_proof_optimized_preset!(@schedule_catalog $catalog);
         }
     };
 }
