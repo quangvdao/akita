@@ -91,7 +91,6 @@ pub fn cost_infinity_fixed(
         infinity_log_trial_probability_lgsa_summary(
             scratch.log_q,
             length_bound,
-            lattice_dimension,
             &summary,
             short.rho,
             short.sieve_dim,
@@ -116,7 +115,6 @@ pub fn cost_infinity_fixed(
         infinity_log_trial_probability(
             scratch.log_q,
             length_bound,
-            lattice_dimension,
             effective_dimension,
             profile.squared_norms(),
             short.rho,
@@ -189,14 +187,13 @@ fn length_bound_as_f64(bound: &Bound) -> Result<f64> {
 fn infinity_log_trial_probability(
     log_q: f64,
     length_bound: f64,
-    lattice_dimension: u64,
     effective_dimension: u64,
     profile: &[f64],
     rho: f64,
     sieve_dim: u32,
 ) -> Result<f64> {
     let d_ = effective_dimension as f64;
-    if ((lattice_dimension as f64).sqrt() * length_bound) <= 2.0_f64.powf(log_q) {
+    if uses_matzov_probability(log_q, length_bound, effective_dimension) {
         let log2_sigma =
             log2_positive(rho) + 0.5 * log2_positive(profile[0]) - 0.5 * log2_positive(d_);
         let log2_erf_arg = log2_positive(length_bound) - 0.5 - log2_sigma;
@@ -209,19 +206,22 @@ fn infinity_log_trial_probability(
 fn infinity_log_trial_probability_lgsa_summary(
     log_q: f64,
     length_bound: f64,
-    lattice_dimension: u64,
     summary: &LgsaSummary,
     rho: f64,
     sieve_dim: u32,
 ) -> Result<f64> {
     let d_ = summary.effective_dimension as f64;
-    if ((lattice_dimension as f64).sqrt() * length_bound) <= 2.0_f64.powf(log_q) {
+    if uses_matzov_probability(log_q, length_bound, summary.effective_dimension) {
         let log2_sigma = log2_positive(rho) + summary.first_log2_norm - 0.5 * log2_positive(d_);
         let log2_erf_arg = log2_positive(length_bound) - 0.5 - log2_sigma;
         Ok(d_ * log2_erf_from_log2_arg(log2_erf_arg))
     } else {
         dilithium_log_trial_probability_lgsa_summary(log_q, length_bound, summary, sieve_dim)
     }
+}
+
+fn uses_matzov_probability(log_q: f64, length_bound: f64, effective_dimension: u64) -> bool {
+    (effective_dimension as f64).sqrt() * length_bound <= 2.0_f64.powf(log_q)
 }
 
 fn dilithium_log_trial_probability_lgsa_summary(
@@ -421,5 +421,39 @@ mod tests {
         assert!(log2_erf.is_finite());
         assert!(log2_erf < -999.0);
         assert!(log2_erf > -1_001.0);
+    }
+
+    #[test]
+    fn probability_regime_uses_active_dimension_after_zeta() {
+        let q = BigUint::from(4_294_967_197_u64);
+        let beta = 343_u32;
+        let original_dimension = 65_537_u64;
+        let zeta = 57_345_u64;
+        let effective_dimension = original_dimension - zeta;
+        let length_bound = 16_777_215.0;
+        let log_q = crate::math::log2_biguint(&q);
+
+        assert!(uses_matzov_probability(
+            log_q,
+            length_bound,
+            effective_dimension
+        ));
+        assert!(!uses_matzov_probability(
+            log_q,
+            length_bound,
+            original_dimension
+        ));
+
+        let params = SisParameters::try_new(
+            1_024,
+            q,
+            Some(original_dimension),
+            Bound::from_u64(16_777_215),
+            SisNorm::Infinity,
+        )
+        .unwrap();
+        let cost = cost_infinity_fixed(beta, &params, zeta, &sample_config()).unwrap();
+        assert_eq!(cost.d, effective_dimension);
+        assert_eq!(cost.beta, Some(beta));
     }
 }
