@@ -5,7 +5,7 @@ use num_traits::{ToPrimitive, Zero};
 
 use crate::{
     config::{EstimateConfig, ShapeModel},
-    cost::{CostValue, EstimateTag, LatticeCost, LogCost},
+    cost::{CostValue, EstimateTag, LatticeCost},
     error::{EstimatorError, Result},
     math::{erf, log2_positive, sis_trivially_easy},
     params::{Bound, SisParameters},
@@ -58,26 +58,8 @@ pub fn cost_infinity_fixed(
             reason: "SIS trivially easy: length_bound must be below (q - 1) / 2".to_string(),
         });
     }
-    let m = params.m.ok_or(EstimatorError::InvalidParameter {
-        field: "m",
-        reason: "fixed infinity cost requires an explicit column count m".to_string(),
-    })?;
-    let lattice_dimension = config.lattice_dimension.unwrap_or(m);
-    let effective_dimension =
-        lattice_dimension
-            .checked_sub(zeta)
-            .ok_or(EstimatorError::InvalidParameter {
-                field: "zeta",
-                reason: "zeta must not exceed the lattice dimension".to_string(),
-            })?;
-    if effective_dimension < u64::from(beta) {
-        return Ok(proven_above_target_cost(
-            params,
-            beta,
-            zeta,
-            effective_dimension,
-        ));
-    }
+    let lattice_dimension = configured_lattice_dimension(params, config)?;
+    let effective_dimension = active_dimension(params, beta, zeta, lattice_dimension)?;
 
     let identity_vectors = effective_dimension as i128 - params.n as i128;
     let reduction_dimension = effective_dimension;
@@ -159,6 +141,52 @@ pub fn cost_infinity_fixed(
             .map(|value| EstimateTag::new(value.clone()))
             .unwrap_or_default(),
     })
+}
+
+pub(crate) fn configured_lattice_dimension(
+    params: &SisParameters,
+    config: &EstimateConfig,
+) -> Result<u64> {
+    let m = params.m.ok_or(EstimatorError::InvalidParameter {
+        field: "m",
+        reason: "infinity estimator requires an explicit column count m".to_string(),
+    })?;
+    let lattice_dimension = config.lattice_dimension.unwrap_or(m);
+    if lattice_dimension > m {
+        return Err(EstimatorError::InvalidConfig {
+            field: "lattice_dimension",
+            reason: "lattice dimension override must not exceed m".to_string(),
+        });
+    }
+    Ok(lattice_dimension)
+}
+
+pub(crate) fn active_dimension(
+    params: &SisParameters,
+    beta: u32,
+    zeta: u64,
+    lattice_dimension: u64,
+) -> Result<u64> {
+    let effective_dimension =
+        lattice_dimension
+            .checked_sub(zeta)
+            .ok_or(EstimatorError::InvalidParameter {
+                field: "zeta",
+                reason: "zeta must not exceed the lattice dimension".to_string(),
+            })?;
+    if effective_dimension <= u64::from(params.n) {
+        return Err(EstimatorError::InvalidParameter {
+            field: "zeta",
+            reason: "zeta must leave an active dimension strictly greater than n".to_string(),
+        });
+    }
+    if effective_dimension < u64::from(beta) {
+        return Err(EstimatorError::InvalidParameter {
+            field: "zeta",
+            reason: "zeta must leave an active dimension at least beta".to_string(),
+        });
+    }
+    Ok(effective_dimension)
 }
 
 fn validate_infinity_profile(config: &EstimateConfig) -> Result<()> {
@@ -324,31 +352,6 @@ fn infinite_cost(
         rop: CostValue::Infinity,
         red: Some(CostValue::Infinity),
         sieve: Some(CostValue::Infinity),
-        delta: Some(crate::reduction::delta(beta)),
-        beta: Some(beta),
-        eta: None,
-        zeta: Some(zeta),
-        d: effective_dimension,
-        prob: None,
-        repetitions: None,
-        tag: params
-            .tag
-            .as_ref()
-            .map(|value| EstimateTag::new(value.clone()))
-            .unwrap_or_default(),
-    }
-}
-
-fn proven_above_target_cost(
-    params: &SisParameters,
-    beta: u32,
-    zeta: u64,
-    effective_dimension: u64,
-) -> LatticeCost {
-    LatticeCost {
-        rop: CostValue::ProvenAboveTarget(LogCost::new(f64::INFINITY)),
-        red: None,
-        sieve: None,
         delta: Some(crate::reduction::delta(beta)),
         beta: Some(beta),
         eta: None,

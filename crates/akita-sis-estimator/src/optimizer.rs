@@ -6,7 +6,7 @@ use crate::{
     config::{EstimateConfig, OptimizerConfig, ReductionCostModel, SearchMode, ShapeModel},
     cost::{CostValue, LatticeCost},
     error::{EstimatorError, Result},
-    lattice::cost_infinity_fixed,
+    lattice::{active_dimension, configured_lattice_dimension, cost_infinity_fixed},
     math::{log2_biguint, log2_positive},
     params::{Bound, SisParameters},
     reduction::{
@@ -124,13 +124,16 @@ fn proven_pruned_zeta_search(
         });
     }
 
-    let m = explicit_m(params)?;
-    let lattice_dimension = config.lattice_dimension.unwrap_or(m).min(m);
+    let lattice_dimension = configured_lattice_dimension(params, config)?;
     let beta_stop = beta_search_stop(params, config)?;
     let beta_start = MIN_BETA.min(beta_stop);
     let mut best = None::<LatticeCost>;
 
     for beta in beta_start..beta_stop.max(beta_start.saturating_add(1)) {
+        let minimum_active_dimension = u64::from(params.n).saturating_add(1).max(u64::from(beta));
+        if minimum_active_dimension > lattice_dimension {
+            continue;
+        }
         // ADPS16's fixed-beta reduction price is a lower bound on the total
         // attack cost. Once it exceeds the best complete candidate, every
         // larger beta is provably unable to win.
@@ -151,9 +154,13 @@ fn proven_pruned_zeta_search(
         // zeta=1, cover the complete zeta domain for each beta. The predecessor
         // points retain the q-vector transition used by lattice-estimator.
         let stable_dimension = lgsa_stable_dimension(u64::from(params.n), &params.q, beta)?
-            .clamp(u64::from(beta), lattice_dimension);
-        let before_stable = stable_dimension.saturating_sub(1).max(u64::from(beta));
-        let before_full = lattice_dimension.saturating_sub(1).max(u64::from(beta));
+            .clamp(minimum_active_dimension, lattice_dimension);
+        let before_stable = stable_dimension
+            .saturating_sub(1)
+            .max(minimum_active_dimension);
+        let before_full = lattice_dimension
+            .saturating_sub(1)
+            .max(minimum_active_dimension);
         for effective_dimension in [
             before_stable,
             stable_dimension,
@@ -180,9 +187,10 @@ fn cost_zeta_with_mode(
     params: &SisParameters,
     config: &EstimateConfig,
 ) -> Result<LatticeCost> {
+    let stop_for_zeta = || beta_search_stop_for_zeta(zeta, params, config);
     match beta_mode {
         SearchMode::PythonLocalMinimum => {
-            let stop = beta_search_stop(params, config)?;
+            let stop = stop_for_zeta()?;
             let rough = local_minimum(u64::from(MIN_BETA), u64::from(stop), 2, |beta| {
                 let beta = u32::try_from(beta).map_err(|_| EstimatorError::InvalidParameter {
                     field: "beta",
@@ -217,7 +225,7 @@ fn cost_zeta_with_mode(
             }
         }
         SearchMode::Exhaustive => {
-            let stop = beta_search_stop(params, config)?;
+            let stop = stop_for_zeta()?;
             if stop <= MIN_BETA {
                 return cost_infinity_fixed(MIN_BETA, params, zeta, config);
             }
@@ -230,7 +238,7 @@ fn cost_zeta_with_mode(
             })
         }
         SearchMode::ExhaustiveParallel => {
-            let stop = beta_search_stop(params, config)?;
+            let stop = stop_for_zeta()?;
             if stop <= MIN_BETA {
                 return cost_infinity_fixed(MIN_BETA, params, zeta, config);
             }
@@ -425,15 +433,34 @@ fn explicit_m(params: &SisParameters) -> Result<u64> {
 }
 
 fn zeta_search_stop(params: &SisParameters, config: &EstimateConfig) -> Result<u64> {
-    let m = explicit_m(params)?;
-    let lattice_dimension = config.lattice_dimension.unwrap_or(m);
-    if lattice_dimension == 0 {
+    let lattice_dimension = configured_lattice_dimension(params, config)?;
+    let minimum_active_dimension = u64::from(params.n)
+        .saturating_add(1)
+        .max(u64::from(MIN_BETA));
+    if lattice_dimension < minimum_active_dimension {
         return Err(EstimatorError::InvalidParameter {
             field: "lattice_dimension",
-            reason: "zeta search requires a positive lattice dimension".to_string(),
+            reason: "zeta search requires an active dimension greater than n and at least beta"
+                .to_string(),
         });
     }
-    Ok(lattice_dimension.min(m))
+    Ok(lattice_dimension - minimum_active_dimension + 1)
+}
+
+fn beta_search_stop_for_zeta(
+    zeta: u64,
+    params: &SisParameters,
+    config: &EstimateConfig,
+) -> Result<u32> {
+    let lattice_dimension = configured_lattice_dimension(params, config)?;
+    let effective_dimension = active_dimension(params, MIN_BETA, zeta, lattice_dimension)?;
+    let dimension_stop = effective_dimension
+        .checked_add(1)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or(EstimatorError::Unsupported {
+            feature: "wide beta search dimension",
+        })?;
+    Ok(beta_search_stop(params, config)?.min(dimension_stop))
 }
 
 fn beta_search_stop(params: &SisParameters, config: &EstimateConfig) -> Result<u32> {
@@ -442,9 +469,11 @@ fn beta_search_stop(params: &SisParameters, config: &EstimateConfig) -> Result<u
 
 fn euclidean_baseline_beta(params: &SisParameters, config: &EstimateConfig) -> Result<u32> {
     let m = explicit_m(params)?;
-    let d = config
-        .lattice_dimension
-        .unwrap_or(euclidean_default_dimension(params, m)?);
+    let d = if config.lattice_dimension.is_some() {
+        configured_lattice_dimension(params, config)?
+    } else {
+        euclidean_default_dimension(params, m)?
+    };
     let length_bound = euclidean_baseline_length_bound(&params.length_bound)?;
     let target_delta = euclidean_target_delta(params, d, length_bound)?;
     let beta = if target_delta >= 1.0 {
@@ -580,5 +609,97 @@ mod tests {
                 "n={n} m={m} bound={bound}: pruned={pruned:?}, exhaustive={exhaustive:?}"
             );
         }
+    }
+
+    #[test]
+    fn fixed_and_search_zeta_leave_a_valid_active_lattice() {
+        let params = SisParameters::try_new(
+            64,
+            akita_q32(),
+            Some(128),
+            Bound::from_u64(15),
+            SisNorm::Infinity,
+        )
+        .unwrap();
+        let fixed = |zeta| EstimateConfig {
+            optimizer: OptimizerConfig::Fixed { beta: 40, zeta },
+            ..EstimateConfig::default()
+        };
+
+        assert!(estimate_infinity(&params, &fixed(63)).is_ok());
+        for zeta in [64, 65] {
+            assert!(matches!(
+                estimate_infinity(&params, &fixed(zeta)),
+                Err(EstimatorError::InvalidParameter { field: "zeta", .. })
+            ));
+        }
+
+        let override_config = |zeta| EstimateConfig {
+            lattice_dimension: Some(100),
+            optimizer: OptimizerConfig::Fixed { beta: 40, zeta },
+            ..EstimateConfig::default()
+        };
+        assert!(estimate_infinity(&params, &override_config(35)).is_ok());
+        assert!(matches!(
+            estimate_infinity(&params, &override_config(36)),
+            Err(EstimatorError::InvalidParameter { field: "zeta", .. })
+        ));
+
+        let oversized_override = EstimateConfig {
+            lattice_dimension: Some(129),
+            optimizer: OptimizerConfig::Fixed { beta: 40, zeta: 0 },
+            ..EstimateConfig::default()
+        };
+        assert!(matches!(
+            estimate_infinity(&params, &oversized_override),
+            Err(EstimatorError::InvalidConfig {
+                field: "lattice_dimension",
+                ..
+            })
+        ));
+        let oversized_search = EstimateConfig {
+            lattice_dimension: Some(129),
+            ..EstimateConfig::default()
+        };
+        assert!(matches!(
+            estimate_infinity(&params, &oversized_search),
+            Err(EstimatorError::InvalidConfig {
+                field: "lattice_dimension",
+                ..
+            })
+        ));
+
+        assert_eq!(
+            zeta_search_stop(&params, &EstimateConfig::default()).unwrap(),
+            64
+        );
+        let optimize_beta = EstimateConfig {
+            optimizer: OptimizerConfig::OptimizeBeta {
+                zeta: 63,
+                beta: SearchMode::Exhaustive,
+            },
+            ..EstimateConfig::default()
+        };
+        let cost = estimate_infinity(&params, &optimize_beta).unwrap();
+        assert!(cost.beta.is_some_and(|beta| beta <= 65));
+        assert_eq!(cost.d, 65);
+
+        let beta_limited = SisParameters::try_new(
+            32,
+            akita_q32(),
+            Some(64),
+            Bound::from_u64(15),
+            SisNorm::Infinity,
+        )
+        .unwrap();
+        assert!(estimate_infinity(&beta_limited, &fixed(24)).is_ok());
+        assert!(matches!(
+            estimate_infinity(&beta_limited, &fixed(25)),
+            Err(EstimatorError::InvalidParameter { field: "zeta", .. })
+        ));
+        assert_eq!(
+            zeta_search_stop(&beta_limited, &EstimateConfig::default()).unwrap(),
+            25
+        );
     }
 }
