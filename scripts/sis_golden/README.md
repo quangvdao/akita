@@ -59,7 +59,8 @@ checkout as the Euclidean table generator:
 c667a48546f140c3a5454c7503c3ca44a264cce2
 ```
 
-(malb/lattice-estimator#217; strict descendant of malb#213 @ 27a581b)
+(tested malb/lattice-estimator#217 revision recorded on 2026-06-27; strict
+descendant of malb#213 @ 27a581b; intentionally not a moving PR-head pin)
 
 Historical estimator golden profile:
 
