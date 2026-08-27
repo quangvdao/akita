@@ -58,7 +58,10 @@ pub fn zgsa_squared_norms(
     let mut diff = slope * 0.5;
     let midpoint = 0.5 * (log_q + log_xi);
 
-    for i in 0..num_q_vec {
+    // Every smoothing step must replace one q-vector and one identity vector
+    // symmetrically around the midpoint. Iterating past the smaller zone would
+    // update only one side and change the profile determinant.
+    for i in 0..num_q_vec.min(n) {
         if diff > 0.5 * (log_q - log_xi) {
             break;
         }
@@ -138,5 +141,26 @@ mod tests {
                 "d={d} beta={beta}: actual={r0_log2}, expected={expected_r0_log2}"
             );
         }
+    }
+
+    #[test]
+    fn zgsa_q_vector_majority_preserves_volume() {
+        let d = 96_u32;
+        let identity_vectors = 32_i64;
+        let q = BigUint::from(4_294_967_197_u64);
+        let profile = zgsa_squared_norms(d, identity_vectors, &q, 40).unwrap();
+        let log_q = log2_biguint(&q) * std::f64::consts::LN_2;
+        let half_sum_log_squared_norms = profile.iter().map(|value| 0.5 * value.ln()).sum::<f64>();
+        let expected = f64::from(d - identity_vectors as u32) * log_q;
+
+        assert!(
+            (half_sum_log_squared_norms - expected).abs() < 1e-9,
+            "actual={half_sum_log_squared_norms}, expected={expected}"
+        );
+        let exact_q_prefix = profile
+            .iter()
+            .take_while(|value| (0.5 * value.ln() - log_q).abs() < 1e-12)
+            .count();
+        assert_eq!(exact_q_prefix, 32);
     }
 }
