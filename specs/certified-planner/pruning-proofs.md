@@ -217,12 +217,12 @@ returns unknown and retains the region.
 | Interchangeable group symmetry | Proved below under an explicit equivalence relation | PR #412 applies a narrower form |
 | Monotone ring-relation transition | Implemented prerequisite from #445; not a pruning theorem | Typed transition authority and independent `m + 1` cutover oracle are present |
 | L2 route omission at the Linf winning split | Not proved and not accepted as an exact domain | Production uses this shortcut; the test oracle derives L2 independently at every split |
-| Local setup first slice pruning | Not proved and not accepted as an exact domain | Current code retains every minimum-padded-setup tie but removes larger local setup choices |
+| Local setup first slice pruning | Not proved and not accepted as an exact domain | Removed in Slice 1; production retains every feasible slice through complete suffix pricing |
 | Fixed radius recursive split search | Not proved and not accepted as an exact domain | Current bounded policy uses this shortcut |
 
-The final three rows are migration requirements. This PR specifies their
-replacement. It does not claim that the present planner already satisfies the
-target contract.
+The L2 and fixed-radius rows remain migration requirements. The slice row
+records the first implemented migration. This specification does not claim
+that the present planner already satisfies the other target contracts.
 
 ### Theorem 1: exact mandatory body in one split cell
 
@@ -594,17 +594,17 @@ splits differ.
 
 ### Setup first slice completeness
 
-The current setup-first shortcut retains every slice tied at the smallest local
-padded setup, but removes every strictly larger local setup before it computes
-all successor witnesses and suffixes. Slice count changes the outer commitment
-input width and can change the B rank. It can also change relation rows,
-compression, the next witness, proof bytes, total setup, root output witness,
-parent admission, and descriptor order.
+Before Slice 1, the setup-first shortcut retained every slice tied at the
+smallest local padded setup but removed every strictly larger local setup before
+it computed all successor witnesses and suffixes. Slice count changes the outer
+commitment input width and can change the B rank. It can also change relation
+rows, compression, the next witness, proof bytes, total setup, root output
+witness, parent admission, and descriptor order.
 
-The exact planner treats slice count as an ordinary transition decision. Since
-the current domain has only four values, it first builds all feasible cheap
-slice signatures. It then applies `setup_slice_dominance_v1` or retains a
-frontier.
+The planner now treats slice count as an ordinary transition decision. Since
+the current domain has only four values, it retains every feasible slice through
+successor sizing and complete suffix pricing. A future optimized planner may
+build the cheap signatures below and apply `setup_slice_dominance_v1`.
 
 The slice transition signature contains at least:
 
@@ -625,11 +625,13 @@ cost and a safe descriptor prefix. When child states differ, the planner keeps
 both until it has either a mapping proof or a completed incumbent which is
 strictly better than the other edge plus its relaxed suffix bound.
 
-The setup first implementation must test all four slice values against a run
-with slice pruning disabled. Boundary cases include a B rank change, a
-compression plan change, equal padded setup with different next witnesses, a
-smaller first setup with a larger total proof, a parent which masks the child
-setup envelope, and an equal numeric score decided by the descriptor.
+The setup-first implementation must test that the production root and recursive
+candidate domains retain all four feasible slice values. Any future certified
+frontier must also compare against the complete domain. Boundary cases include
+a B rank change, a compression plan change, equal padded setup with different
+next witnesses, a smaller first setup with a larger total proof, a parent which
+masks the child setup envelope, and an equal numeric score decided by the
+descriptor.
 
 ### Theorem 5: interchangeable group symmetry
 

@@ -324,11 +324,7 @@ pub(crate) fn root_level_candidates_for_basis(
             }
             slice_candidates.push(candidate_params);
         }
-        for candidate_params in crate::schedule_params::prune_locally_unprofitable_slices(
-            policy,
-            &opening_batch,
-            slice_candidates,
-        )? {
+        for candidate_params in slice_candidates {
             let Some(output_witness_len) = root_batch_next_w_len(
                 field_bits,
                 policy.claim_ext_degree,

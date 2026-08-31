@@ -442,6 +442,64 @@ fn packing_split_bounds_preserve_the_exhaustive_candidate_frontier() {
 
 #[cfg(feature = "catalog-gen")]
 #[test]
+fn setup_first_recursive_frontier_retains_every_feasible_slice() {
+    use akita_config::{policy_of, proof_optimized::fp64::Dense};
+
+    let policy = policy_of::<Dense>();
+    assert_eq!(
+        policy.selection_policy,
+        crate::SelectionPolicyId::MinFirstDirectSetupThenPayloadV2
+    );
+    let dimensions = CommitmentRingDims {
+        inner: 256,
+        outer: 128,
+        opening: 64,
+    };
+    let opening =
+        PlannerOpeningCandidate::coefficient_packing(1, policy.claim_ext_degree, dimensions, 64)
+            .expect("valid packing request")
+            .expect("production packing geometry");
+    let candidates = derive_fold_candidates(
+        RecursiveCandidateRequest {
+            policy: &policy,
+            payload_mode: akita_types::CommitmentPayloadMode::Compressed,
+            opening,
+            dimensions,
+            current_witness_len: 948_672,
+            source: crate::InnerBasisSource::BalancedDigits { log_basis: 3 },
+            log_basis_inner: 3,
+            log_basis_open: 3,
+            fold_level: 1,
+            source_moment: Some(
+                crate::response_model::SourceMomentEstimate::new(1_000_000).unwrap(),
+            ),
+            relation_traversal_order: RelationTraversalOrder::Canonical,
+        },
+        RecursiveFoldWork::direct(RelationSearchDomain::QuotientOnly),
+        FoldCandidatePolicy::Frontier(SplitBoundPolicy::DisabledForOracle),
+    )
+    .expect("recursive slice frontier");
+
+    let mut slices_by_split =
+        std::collections::BTreeMap::<usize, std::collections::BTreeSet<usize>>::new();
+    for (candidate, _) in candidates {
+        slices_by_split
+            .entry(candidate.params.block_index_bits())
+            .or_default()
+            .insert(candidate.params.outer_slice_count().get());
+    }
+    let expected = akita_types::CommitmentSliceCount::ALL
+        .into_iter()
+        .map(akita_types::CommitmentSliceCount::get)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(
+        slices_by_split.values().any(|slices| slices == &expected),
+        "at least one recursive split must retain all four slice transitions"
+    );
+}
+
+#[cfg(feature = "catalog-gen")]
+#[test]
 fn root_packing_candidates_use_adversarial_linf_and_exact_d_width() {
     use akita_config::{
         honest_fold_policy_of, policy_of, proof_optimized::fp64::Dense, CommitmentConfig,
@@ -472,6 +530,24 @@ fn root_packing_candidates_use_adversarial_linf_and_exact_d_width() {
     )
     .expect("root packing candidates");
     assert!(!candidates.is_empty());
+    let mut slices_by_split =
+        std::collections::BTreeMap::<usize, std::collections::BTreeSet<usize>>::new();
+    for (params, _) in &candidates {
+        slices_by_split
+            .entry(params.block_index_bits())
+            .or_default()
+            .insert(params.outer_slice_count().get());
+    }
+    let expected_slices = akita_types::CommitmentSliceCount::ALL
+        .into_iter()
+        .map(akita_types::CommitmentSliceCount::get)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(
+        slices_by_split
+            .values()
+            .any(|slices| slices == &expected_slices),
+        "at least one root split must retain all four slice transitions"
+    );
     let (first_params, first_next_witness_len) = &candidates[0];
     let (packing_direct_bytes, _) =
         akita_schedules::planner_support::nonterminal_level_payload_bytes(

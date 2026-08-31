@@ -94,9 +94,8 @@ The target architecture starts from several settled changes.
    suffix memoization. Those caches are accelerators, not search authorities.
 8. The current test support has an unpruned recursive candidate enumerator. It
    scans every split and derives Linf and eligible selective-L2 candidates
-   independently of the production split walker and local slice pruning. The
-   production and reference paths still share materializers rather than one
-   search orchestrator.
+   independently of the production split walker. The production and reference
+   paths still share materializers rather than one search orchestrator.
 
 The remaining problems concern the meaning and proof of the search.
 
@@ -109,19 +108,20 @@ cannot win the complete objective. Root totality therefore holds only within
 this configured split domain.
 
 Selective L2 planning currently derives candidates from the split selected by
-the best modeled Linf candidate for each admitted relation mode. Setup-first
-slice pruning now preserves every candidate tied at the minimum local padded
-setup, but it still removes strictly larger local setup choices before
-successor witness sizing and suffix search. Some levels retain a split
-frontier while others keep a local best candidate according to level and policy
-conditions. Each choice may be useful, but the code does not give every
-omission a common proof contract.
+the best modeled Linf candidate for each admitted relation mode. Some levels
+retain a split frontier while others keep a local best candidate according to
+level and policy conditions. Each choice may be useful, but the code does not
+give every omission a common proof contract.
+
+Slice 1 removed the setup-first minimum-local-setup shortcut. Root, recursive
+Linf, and recursive selective-L2 generation now retain every feasible slice
+through successor sizing and complete suffix pricing. A later certified slice
+frontier may recover performance, but local setup alone is no longer a search
+authority.
 
 There is no theorem which says that the best L2 route uses the best Linf split.
-There is also no theorem which says that a larger local padded setup cannot
-produce the best complete setup-first schedule. The audited domain must include
-the other L2 splits and slice choices until a checked certificate covers their
-complete objective effect.
+The audited domain must include the other L2 splits until a checked certificate
+covers their complete objective effect.
 
 ### Reference and production search remain separate
 
@@ -1413,33 +1413,25 @@ full schedule drift job command from `.github/workflows/ci.yml`.
 
 ## Execution plan
 
-### Slice 1: Domain and pruning census
+### Slice 1: Complete setup-first slice domain
 
-Inventory every current candidate omission, local retention rule, cache, and
-pruning rule. Record its owning function, domain, current rationale, selected
-schedule effect, diagnostic counter, and oracle switch. Classify it as:
+Remove `prune_locally_unprofitable_slices` from root, recursive Linf, and
+recursive selective-L2 candidate generation. Materialize every feasible member
+of the four-value slice domain and retain it through exact successor sizing and
+the existing complete suffix frontiers. Do not replace the shortcut with a new
+local score or wrapper authority.
 
-```text
-exact domain definition
-proved equivalence
-certified pruning
-ordering heuristic
-unproved semantic restriction
-cache or memo only
-```
+Focused tests must show that one feasible root split and one feasible recursive
+split each retain all four slice transitions under the setup-first V2 policy.
+The independent small oracle must continue to agree on the complete objective
+and descriptor. Regenerate and replay every affected generated schedule; a
+selected-row change is an expected planner result, not a compatibility failure.
 
-Start from the post-#445 implementation: include the bounded split walker,
-L2-at-best-Linf production route, setup-first minimum-padded-setup filter,
-relation-transition domain, compression-plan cache, response-model caches,
-setup-prefix cache, suffix memo, parent-observable frontiers, and objective
-bounds. Add counters and a machine-readable diagnostic report without changing
-candidate selection. Record paired baselines for one cheap direct row and the
-named high-pressure recursive row with a bounded Rayon thread count. Do not
-regenerate all schedules for this instrumentation-only slice.
-
-No unproved semantic restriction may remain in an exact production catalog at
-the final cutover. Slice 1 makes the debt explicit; it does not mislabel current
-production catalogs as exact.
+This slice deliberately adds no slice-dominance theorem. Slice 6 may recover
+performance after it can prove that an omitted slice is irrelevant to every
+parent and suffix consumer. Diagnostic counters should be added with the
+semantic slice they measure rather than through a separate instrumentation-only
+implementation layer.
 
 ### Slice 2: Canonical decisions and typed rejection
 
@@ -1477,13 +1469,13 @@ transition signature, and retain both routes unless
 post-#445 independent L2 enumerator as comparison evidence until shared oracle
 execution supersedes it.
 
-### Slice 6: Setup-first slice frontier
+### Slice 6: Certified slice dominance
 
-Replace `prune_locally_unprofitable_slices` with one canonical slice transition
-frontier. Materialize the four cheap slice signatures, retain different child
-states, and apply `setup_slice_dominance_v1` only when the shared dominance
-theorem holds. Test all slices under both V2 objectives, including root
-output-witness and descriptor ties.
+Add one canonical slice transition frontier only if retaining all four slices
+is a material performance cost. Apply `setup_slice_dominance_v1` only when the
+shared dominance theorem covers every parent observation and suffix consumer.
+Test the optimized frontier against the complete Slice 1 domain under both V2
+objectives, including root output-witness and descriptor ties.
 
 ### Slice 7: Relaxed suffix bounds and transition dominance
 

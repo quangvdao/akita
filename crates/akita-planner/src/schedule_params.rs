@@ -499,36 +499,6 @@ pub(crate) type RingChallengeConfigFn<'a> =
 
 pub(crate) type LayoutCandidateScore = (usize, usize, usize, usize);
 
-/// For setup-primary planning, retain every slice that reaches the best local
-/// setup objective before witness sizing and suffix recursion. Equal setup
-/// candidates can still differ in proof size or the complete descriptor.
-pub(crate) fn prune_locally_unprofitable_slices(
-    policy: &PlannerPolicy,
-    opening_layout: &OpeningClaimsLayout,
-    candidates: Vec<CommittedGroupParams>,
-) -> Result<Vec<CommittedGroupParams>, AkitaError> {
-    if policy.selection_policy == crate::SelectionPolicyId::MinEstimatedProofPayloadV2
-        || candidates.len() <= 1
-    {
-        return Ok(candidates);
-    }
-    let mut best_setup = None;
-    let mut retained = Vec::new();
-    for params in candidates {
-        let setup_score = padded_setup_prefix_len(active_setup_field_len(&params, opening_layout)?);
-        match best_setup.map(|best| setup_score.cmp(&best)) {
-            None | Some(std::cmp::Ordering::Less) => {
-                best_setup = Some(setup_score);
-                retained.clear();
-                retained.push(params);
-            }
-            Some(std::cmp::Ordering::Equal) => retained.push(params),
-            Some(std::cmp::Ordering::Greater) => {}
-        }
-    }
-    Ok(retained)
-}
-
 /// Combine exact physical width, challenge work, chunk evaluator work,
 /// and load imbalance when comparing `M` candidates. All terms count ring or
 /// scalar work units; exact physical width remains an explicit tie-breaker.

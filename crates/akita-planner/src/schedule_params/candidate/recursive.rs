@@ -429,27 +429,11 @@ impl RecursiveCandidateContext<'_, '_> {
                 for transition in
                     relation_domain.transitions_in(self.request.relation_traversal_order)
                 {
-                    let mode_slices = slice_candidates
+                    for candidate in slice_candidates
                         .iter()
                         .filter(|candidate| candidate.relation_transition == *transition)
                         .cloned()
-                        .collect::<Vec<_>>();
-                    let retained_slices =
-                        crate::schedule_params::prune_locally_unprofitable_slices(
-                            policy,
-                            &search.opening_layout,
-                            mode_slices
-                                .into_iter()
-                                .map(|candidate| candidate.params)
-                                .collect(),
-                        )?
-                        .into_iter()
-                        .map(|params| RecursiveRelationCandidate {
-                            params,
-                            relation_transition: *transition,
-                        })
-                        .collect::<Vec<_>>();
-                    for candidate in retained_slices {
+                    {
                         let relation_mode = candidate.relation_transition.mode();
                         let Some((score, params, next_witness_len)) =
                             finalize_recursive_level_candidate(policy, search, candidate.params)?
@@ -637,21 +621,7 @@ fn append_selective_l2_candidates(
                 });
             }
         }
-        let retained_slices = crate::schedule_params::prune_locally_unprofitable_slices(
-            policy,
-            &search.opening_layout,
-            sliced
-                .into_iter()
-                .map(|candidate| candidate.params)
-                .collect(),
-        )?
-        .into_iter()
-        .map(|params| RecursiveRelationCandidate {
-            params,
-            relation_transition,
-        })
-        .collect::<Vec<_>>();
-        for candidate in retained_slices {
+        for candidate in sliced {
             let Some((_, params, next_witness_len)) =
                 finalize_recursive_level_candidate(policy, search, candidate.params)?
             else {

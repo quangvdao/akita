@@ -164,13 +164,12 @@ offline policy only. Runtime profiles carry the resulting exact basis, digit
 depth, widths, ranks, and bounds without a source tag.
 
 Proof-optimized catalogs currently admit inner bases 3 through 10 for the Q32
-modulus profile and 3 through 11 for Q64 and Q128. These upper limits are
-versioned search-policy choices from exhaustive schedule sweeps, not protocol
-or signed-storage limits. Bases 9 through 11 require the exact signed-i16
-commitment path. The underlying kernel admits bases through 16, so widening a
-catalog range requires a new sweep, SIS coverage for every admitted A cell,
-catalog regeneration, and a changed catalog identity. It does not require a
-wire-format change.
+modulus profile and 3 through 16 for Q64 and Q128. These upper limits are
+versioned search-policy choices, not protocol or signed-storage limits. Bases 9
+through 16 require the exact signed-i16 commitment path. Widening a catalog
+range requires a new sweep, SIS coverage for every admitted A cell, catalog
+regeneration, and a changed catalog identity. It does not require a wire-format
+change.
 
 The source norm MUST be computed from the selected inner basis and A ring
 dimension. Balanced sources use

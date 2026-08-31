@@ -2,7 +2,7 @@ use super::*;
 
 /// Enumerate every root split and slice for the single-group oracle fixture.
 /// Candidate materialization stays canonical, while this reference domain is
-/// independent of production split bounds and local slice pruning.
+/// independent of production split bounds and traversal order.
 pub(crate) fn exhaustive_root_candidates_for_reference(
     key: &AkitaScheduleLookupKey,
     final_honest_fold_policy: HonestFoldPolicySpec,
